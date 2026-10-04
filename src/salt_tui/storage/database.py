@@ -241,6 +241,9 @@ class Database:
     async def progress(self, run_id: int) -> list[dict]:
         return await self.query("SELECT * FROM run_minion_progress WHERE run_id=? ORDER BY minion_id", (run_id,))
 
+    async def run_minions(self, run_id: int) -> list[dict]:
+        return await self.query("SELECT * FROM minion_results WHERE run_id=? ORDER BY minion_id", (run_id,))
+
     async def live_states(self, run_id: int, minion_id: str) -> list[dict]:
         return await self.query("SELECT * FROM run_state_progress WHERE run_id=? AND minion_id=? ORDER BY event_tag", (run_id, minion_id))
 

@@ -122,7 +122,8 @@ class EventScreen(Screen):
 
 
 class LiveRunScreen(Screen):
-    BINDINGS = [("f", "next_failure", "Next failed minion")]
+    BINDINGS = [("f", "next_failure", "Next failed minion"), ("n", "next_failed_state", "Next failed state"),
+                ("o", "open_failed_source", "Failed source")]
 
     @property
     def shell(self) -> SaltTUI:
@@ -130,8 +131,17 @@ class LiveRunScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Static("Live state run", classes="page-title")
+        yield Static(self.shell.breadcrumb_text(), classes="breadcrumb")
+        yield Static("Run tracker — progress, failures, and logs", classes="page-title")
         yield Static("", id="live_header")
+        yield Static("", id="run_summary")
+        yield Static("f Next failed minion · n Next failed state · o Open failed source · Esc Back", id="tracker_hint")
+        with Horizontal(classes="toolbar"):
+            yield Button("State results", id="tracker_results")
+            yield Button("Next failed state", id="tracker_next_failure")
+            yield Button("Failed source", id="tracker_source")
+            yield Button("Run logs", id="tracker_logs")
+            yield Button("Refresh", id="tracker_refresh")
         with Horizontal(id="split"):
             yield DataTable(id="minion_progress", cursor_type="row")
             with VerticalScroll(id="detail-scroll"):
@@ -145,13 +155,21 @@ class LiveRunScreen(Screen):
         self._rendered: dict[str, tuple[str, str, str]] = {}
         self._shown_run_id: int | None = None
         self._rows: dict[str, dict] = {}
+        self._selected_failure: tuple[str, str] | None = None
+        self._failure_rows: list[dict] = []
+        self._failure_index = 0
+        self._base_detail = ""
+        self._shown_minion: str | None = None
+        self.query_one("#tracker_source", Button).disabled = True
+        self.query_one("#tracker_next_failure", Button).disabled = True
         await self.refresh_data()
+        table.focus()
         self.set_interval(1, self.refresh_data)
 
     async def refresh_data(self) -> None:
         run_id = self.shell.current_run_id
         if not run_id:
-            self.query_one("#live_header", Static).update("No live run selected. Use Run Live in the command runner.")
+            self.query_one("#live_header", Static).update("No run selected. Start from SLS Explorer or History.")
             return
         run = await self.shell.db.run(run_id)
         if not run:
@@ -159,13 +177,45 @@ class LiveRunScreen(Screen):
         self.query_one("#live_header", Static).update(
             f"Run #{run_id} | {run['command_type']} | Target: {run['target_expression']} | JID: {run['jid'] or '?'} | Status: {run['status']}")
         progress = await self.shell.db.progress(run_id)
+        returned = await self.shell.db.run_minions(run_id)
+        states = await self.shell.db.states(run_id)
+        state_counts: dict[str, int] = {}
+        for state in states:
+            state_counts[state["minion_id"]] = state_counts.get(state["minion_id"], 0) + 1
+        merged = {row["minion_id"]: dict(row) for row in progress}
+        for row in returned:
+            minion = row["minion_id"]
+            if minion not in merged:
+                merged[minion] = {"minion_id": minion, "status": "success" if row["success"] else "failed",
+                                  "completed_states": state_counts.get(minion, 0), "total_states": state_counts.get(minion, 0),
+                                  "return_code": row["return_code"]}
+        counts = {status: sum(row["status"] == status for row in merged.values())
+                  for status in ("success", "failed", "pending", "running", "no_return")}
+        bus = self.shell.events.status
+        if bus not in {"listening", "connected", "connecting"}:
+            bus = "unavailable"
+        self.query_one("#run_summary", Static).update(
+            f"{len(merged)} known minions · {counts['success']} complete · {counts['failed']} failed · "
+            f"{counts['pending'] + counts['running']} pending · {counts['no_return']} no return · "
+            f"Event bus: {bus}")
         table = self.query_one("#minion_progress", DataTable)
         if self._shown_run_id != run_id:
             table.clear()
             self._rendered.clear()
+            self._shown_minion = None
+            self._failure_rows = []
+            self._failure_index = 0
             self._shown_run_id = run_id
-        self._rows = {row["minion_id"]: row for row in progress}
-        for row in progress:
+        self._rows = dict(sorted(merged.items()))
+        if not self._rows:
+            self._selected_failure = None
+            self._failure_rows = []
+            self.query_one("#tracker_source", Button).disabled = True
+            self.query_one("#tracker_next_failure", Button).disabled = True
+            self.query_one("#live_detail", Static).update(
+                "No minion returns yet. The target may still be running or may not have responded.\n"
+                "Use Refresh or check the event bus status above.")
+        for row in self._rows.values():
             states = str(row["completed_states"]) + (f"/{row['total_states']}" if row["total_states"] is not None else "/?")
             values = (row["status"].upper().replace("_", " "), states,
                       str(row["return_code"]) if row["return_code"] is not None else "")
@@ -177,20 +227,93 @@ class LiveRunScreen(Screen):
                     if previous != current:
                         table.update_cell(row["minion_id"], column, current)
             self._rendered[row["minion_id"]] = values
+        if table.row_count:
+            try:
+                selected = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
+            except Exception:
+                selected = None
+            if selected in self._rows:
+                await self._show_minion(selected)
 
     async def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        await self._show_minion(str(event.row_key.value))
+
+    async def _show_minion(self, minion: str) -> None:
         run_id = self.shell.current_run_id
-        minion = str(event.row_key.value)
-        if not run_id:
+        if not run_id or minion not in self._rows:
             return
         completed = [s for s in await self.shell.db.states(run_id) if s["minion_id"] == minion]
         live = await self.shell.db.live_states(run_id, minion)
-        lines = [f"Minion: {minion}", f"Progress events: {len(live)}", ""]
+        table = self.query_one("#minion_progress", DataTable)
+        if not table.row_count:
+            return
+        try:
+            if str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value) != minion:
+                return
+        except Exception:
+            return
+        failures = [state for state in completed if state["result"] == 0]
+        if self._shown_minion != minion:
+            self._failure_index = 0
+        self._shown_minion = minion
+        self._failure_rows = failures
+        self._failure_index %= max(1, len(failures))
+        self.query_one("#tracker_next_failure", Button).disabled = len(failures) < 2
+        lines = [f"Minion: {minion}", f"Status: {self._rows.get(minion, {}).get('status', '?')}",
+                 f"Progress events: {len(live)}", ""]
         if completed:
-            lines.extend(f"{'✗' if s['result'] == 0 else '✓' if s['result'] == 1 else '?'} {s['state_id']}  {s['state_module']}.{s['state_function']}  {s['duration_ms'] or '?'}ms" for s in completed)
+            for state in completed:
+                lines.append(f"{'✗' if state['result'] == 0 else '✓' if state['result'] == 1 else '?'} "
+                             f"{state['state_id']}  {state['state_module']}.{state['state_function']}  "
+                             f"{state['duration_ms'] or '?'}ms")
+                if state["result"] == 0:
+                    lines.append(f"  {state['comment'] or 'No error comment from Salt'}")
         else:
             lines.extend(f"{s['status'] or '?'} {s['state_id'] or s['event_tag']}" for s in live)
-        self.query_one("#live_detail", Static).update("\n".join(lines))
+        self._base_detail = "\n".join(lines)
+        self._show_failure_selection()
+
+    def _show_failure_selection(self) -> None:
+        if self._failure_rows:
+            row = self._failure_rows[self._failure_index]
+            self._selected_failure = (row["sls"], row["state_id"]) if row["sls"] else None
+            detail = (f"\n\nSelected failure {self._failure_index + 1}/{len(self._failure_rows)}: "
+                      f"{row['state_id']} · {row['sls'] or 'source unavailable'}\n"
+                      "Press n for the next failed state, o to open its source.")
+        else:
+            self._selected_failure = None
+            detail = ""
+        self.query_one("#tracker_source", Button).disabled = self._selected_failure is None
+        self.query_one("#live_detail", Static).update(self._base_detail + detail)
+
+    def action_next_failed_state(self) -> None:
+        if len(self._failure_rows) < 2:
+            self.notify("No other failed state for this minion")
+            return
+        self._failure_index = (self._failure_index + 1) % len(self._failure_rows)
+        self._show_failure_selection()
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        run_id = self.shell.current_run_id
+        if event.button.id == "tracker_results" and run_id:
+            self.shell.open_run(run_id)
+        elif event.button.id == "tracker_next_failure":
+            self.action_next_failed_state()
+        elif event.button.id == "tracker_source":
+            self.action_open_failed_source()
+        elif event.button.id == "tracker_refresh":
+            await self.refresh_data()
+        elif event.button.id == "tracker_logs" and run_id:
+            rows = await self.shell.db.logs(run_id=run_id)
+            self.query_one("#live_detail", Static).update(
+                "Run logs:\n\n" + "\n".join(f"[{row['level']}] {row['message']}" for row in rows)
+                if rows else "No logs recorded for this run.")
+
+    def action_open_failed_source(self) -> None:
+        if self._selected_failure:
+            self.shell.open_source(*self._selected_failure)
+        else:
+            self.notify("Select a minion with a failed state", severity="warning")
 
     def action_next_failure(self) -> None:
         table = self.query_one("#minion_progress", DataTable)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+import json
 from pathlib import Path
 import tempfile
 import logging
@@ -28,9 +30,9 @@ from salt_tui.plugins import PluginRegistry, load_plugins
 LOG = logging.getLogger("salt_tui")
 from salt_tui.sls.graph import StateGraph
 from salt_tui.sls.source_links import locate_source
-from salt_tui.ui.screens import (CommandScreen, DashboardScreen, FailuresScreen, HistoryScreen,
+from salt_tui.ui.screens import (CommandScreen, ConfirmScreen, DashboardScreen, FailuresScreen, HistoryScreen,
                                  JobsScreen, LogsScreen, MinionsScreen, PaletteScreen, SettingsScreen,
-                                 SlsScreen, StatesScreen)
+                                 SlsScreen, StateReviewScreen, StatesScreen)
 
 
 class SaltTUI(App):
@@ -45,16 +47,20 @@ class SaltTUI(App):
     #detail-scroll { width: 45%; height: 1fr; border-left: solid $primary; }
     #detail, #source { padding: 1; width: auto; height: auto; }
     .breadcrumb { height: 1; padding: 0 1; color: $text-muted; }
-    #sls-hint, #sls-functions, #sls-status { height: 1; padding: 0 1; }
-    #sls-hint { color: $text-muted; }
+    #sls-hint, #sls-fields, #sls-functions, #sls-status, #review_hint, #tracker_hint { height: 1; padding: 0 1; }
+    #sls-hint, #sls-fields, #review_hint, #tracker_hint { color: $text-muted; }
     #sls-functions { color: $text-muted; }
     #sls-status { color: $accent; }
     #sls-loading { height: 1; display: none; }
     #sls-detail { width: 45%; height: 1fr; border-left: solid $primary; }
     #sls-detail #detail-scroll { width: 100%; border: none; }
     #source-title { height: 1; padding: 0 1; text-style: bold; background: $surface; }
+    #source-origin { height: auto; max-height: 3; padding: 0 1; color: $text-muted; }
+    #review_summary { height: auto; min-height: 2; padding: 0 1; text-style: bold; }
+    #review_table { width: 55%; height: 1fr; }
     .toolbar { height: 3; }
     .toolbar Input { width: 1fr; }
+    .toolbar Input.target-type { width: 14; }
     .toolbar Button { min-width: 12; }
     #recent, #output, #jobs { height: 1fr; }
     #graph_split { height: 1fr; }
@@ -73,7 +79,7 @@ class SaltTUI(App):
         ("s", "show('sls')", "SLS"), ("h", "show('history')", "History"),
         ("l", "show('logs')", "Logs"), ("c", "show('command')", "Command"),
         ("t", "show('settings')", "Settings"), ("colon", "palette", "Palette"),
-        ("e", "show('events')", "Events"), ("v", "show('live')", "Live run"),
+        ("e", "show('events')", "Events"), ("v", "show('live')", "Run tracker"),
         ("g", "show('graph')", "Graph"),
         ("i", "show('intelligence')", "Failure patterns"), ("p", "show('performance')", "Slow states"),
         ("ctrl+u", "show('runner')", "Runner"), ("ctrl+o", "show('orchestration')", "Orchestration"),
@@ -103,6 +109,9 @@ class SaltTUI(App):
         self.current_run_id: int | None = None
         self.current_sls: str | None = None
         self.current_graph: StateGraph | None = None
+        self.review_run_id: int | None = None
+        self.review_spec: CommandSpec | None = None
+        self.last_state_test: tuple[tuple, int] | None = None
         self.selected_target: dict | None = None
         self.initial = initial
         self._current_screen_name = initial
@@ -126,6 +135,7 @@ class SaltTUI(App):
             "dashboard": DashboardScreen(), "command": CommandScreen(self.initial_command),
             "minions": MinionsScreen(), "jobs": JobsScreen(), "states": StatesScreen(),
             "sls": SlsScreen(), "history": HistoryScreen(), "logs": LogsScreen(),
+            "review": StateReviewScreen(),
             "failures": FailuresScreen(), "settings": SettingsScreen(),
             "events": EventScreen(), "live": LiveRunScreen(),
             "graph": GraphScreen(),
@@ -212,6 +222,61 @@ class SaltTUI(App):
         minions = sorted(str(minion) for minion in run.parsed)
         return minions, "Responding minions only; unreachable matches may be absent."
 
+    @staticmethod
+    def _state_workflow_key(spec: CommandSpec) -> tuple:
+        return (spec.executable, spec.target, spec.target_type, tuple(spec.arguments), spec.saltenv, spec.pillarenv)
+
+    async def start_state_workflow(self, spec: CommandSpec) -> None:
+        spec = replace(spec, arguments=list(spec.arguments), options=list(spec.options))
+        if spec.function != "state.apply" or not spec.arguments:
+            raise ValueError("Select an SLS state to test or apply")
+        if spec.test:
+            await self._execute_state_workflow(spec, None)
+            return
+        preview_id = (self.last_state_test[1] if self.last_state_test
+                      and self.last_state_test[0] == self._state_workflow_key(spec) else None)
+        preview = await self.db.states(preview_id) if preview_id else []
+        planned = sum(bool(json.loads(row["changes_json"])) for row in preview)
+        failed = sum(row["result"] == 0 for row in preview)
+        matched: list[str] | None = None
+        note = "Local salt-call" if spec.executable == "salt-call" else "Target reachability not checked"
+        if spec.executable == "salt":
+            try:
+                matched, note = await self.preview_target(spec)
+            except Exception as exc:
+                note = f"Target preview unavailable: {self.client.redactor.text(str(exc))[:180]}"
+            if self.events.source is not None and self.events.status in {"listening", "connected"}:
+                spec.async_run = True
+                if "state_events=True" not in spec.arguments:
+                    spec.arguments.append("state_events=True")
+        safe = display_argv(self.client.redactor.argv(build_argv(spec, self.settings)))
+        preview_text = (f"Dry run #{preview_id}: {len(preview)} states, {planned} planned changes, {failed} failures"
+                        if preview_id else "No matching dry run. Use Test state first to review planned changes.")
+        target_text = f"Responding minions: {len(matched)} · {note}" if matched is not None else note
+        message = (f"Apply {spec.arguments[0]}?\nTarget: {spec.target}\nEnvironment: {spec.saltenv or self.settings.default_saltenv}\n"
+                   f"{target_text}\n{preview_text}\n\n{safe}")
+        self.push_screen(ConfirmScreen(message, confirm_label="Apply state"),
+                         lambda approved: asyncio.create_task(self._execute_state_workflow(spec, preview_id)) if approved else None)
+
+    async def _execute_state_workflow(self, spec: CommandSpec, preview_id: int | None) -> None:
+        try:
+            run = await self.execute(spec, parent_run_id=preview_id)
+        except Exception as exc:
+            self.notify(f"State execution failed: {self.client.redactor.text(str(exc))[:180]}", severity="error")
+            return
+        if run.id is None:
+            self.notify("Salt ran, but its result could not be saved to history", severity="error")
+            return
+        self.current_run_id = run.id
+        if spec.test:
+            self.last_state_test = (self._state_workflow_key(spec), run.id)
+            self.review_run_id = run.id
+            self.review_spec = spec
+            self.show_screen("review")
+            self.screen.call_after_refresh(self.screen.refresh_data)
+        else:
+            self.open_live_run(run.id)
+
     def should_confirm(self, spec: CommandSpec, response_count: int | None) -> bool:
         if not self.settings.confirm_changes:
             return False
@@ -278,7 +343,8 @@ class SaltTUI(App):
         self._update_breadcrumb()
 
     def breadcrumb_text(self) -> str:
-        names = {"sls": "SLS Explorer", "graph": "Dependencies", "states": "State Results"}
+        names = {"sls": "SLS Explorer", "graph": "Dependencies", "states": "State Results",
+                 "review": "Dry-run Review", "live": "Run Tracker"}
         trail = (self._screen_history[-2:] + [self._current_screen_name])
         return " › ".join(names.get(name, name.replace("_", " ").title()) for name in trail)
 
@@ -310,7 +376,7 @@ class SaltTUI(App):
             asyncio.create_task(self.screen.refresh_data())
 
     def action_help(self) -> None:
-        self.notify("d Dashboard | m Minions | j Jobs | r States | Ctrl+M Matrix | v Live | e Events | g Graph | s SLS | h History | l Logs | i Failures | p Slow | Ctrl+U Runner | Ctrl+O Orchestration | Ctrl+T Targets | c Command | : Palette | q Quit", timeout=10)
+        self.notify("d Dashboard | m Minions | j Jobs | r States | Ctrl+M Matrix | v Run tracker | e Events | g Graph | s SLS | h History | l Logs | i Failures | p Slow | Ctrl+U Runner | Ctrl+O Orchestration | Ctrl+T Targets | c Command | : Palette | Esc Back | q Quit", timeout=10)
 
     def action_palette(self) -> None:
         def selected(value: str | None) -> None:
