@@ -1,0 +1,1 @@
+{"web-01":{"file_|-nginx-config_|-/etc/nginx/nginx.conf_|-managed":{"__id__":"nginx-config","__sls__":"nginx.config","name":"/etc/nginx/nginx.conf","result":true,"changes":{"diff":"updated"},"comment":"File updated","duration":420.0}}}

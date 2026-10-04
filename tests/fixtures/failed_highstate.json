@@ -1,0 +1,13 @@
+{
+  "web-01": {
+    "pkg_|-nginx-package_|-nginx_|-installed": {
+      "__id__": "nginx-package", "__sls__": "nginx.init", "name": "nginx", "result": true,
+      "changes": {"new": "1.24"}, "comment": "Installed", "duration": 1200.2, "start_time": "13:22:01"
+    },
+    "service_|-nginx-service_|-nginx_|-running": {
+      "__id__": "nginx-service", "__sls__": "nginx.service", "name": "nginx", "result": false,
+      "changes": {}, "comment": "Service failed to start", "duration": 200.0, "start_time": "13:22:02"
+    }
+  },
+  "web-02": false
+}

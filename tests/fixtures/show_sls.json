@@ -1,0 +1,1 @@
+{"local":{"nginx-package":{"pkg.installed":[{"name":"nginx"},{"order":10000}],"__sls__":"nginx.init"}}}

@@ -1,0 +1,1 @@
+{"web-01":{"pkg_|-nginx-package_|-nginx_|-installed":{"__id__":"nginx-package","__sls__":"nginx.init","name":"nginx","result":true,"changes":{},"comment":"Already installed","duration":35.0}}}

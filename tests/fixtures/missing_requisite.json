@@ -1,0 +1,1 @@
+{"local":[{"__id__":"nginx-service","__sls__":"nginx.service","state":"service","fun":"running","name":"nginx","require":[{"pkg":"missing-package"}]}]}

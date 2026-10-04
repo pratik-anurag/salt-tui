@@ -1,0 +1,1 @@
+Rendering SLS 'base:nginx.init' failed: mapping values are not allowed here; line 8

@@ -1,0 +1,29 @@
+database = "~/.local/share/salt-tui/history.db"
+default_target = "*"
+default_saltenv = "base"
+confirm_changes = true
+confirmation_mode = "always" # always, large-target, production-only, never
+confirm_if_target_count = 20
+production_envs = ["prod", "production"]
+redaction_patterns = []
+refresh_seconds = 30
+history_limit = 10000
+log_limit = 100000
+event_retention = 100000
+live_return_timeout_seconds = 300
+master_config = "/etc/salt/master"
+salt = "salt"
+salt_call = "salt-call"
+salt_run = "salt-run"
+salt_key = "salt-key"
+salt_cp = "salt-cp"
+backend = "cli" # cli or python (requires Salt in this Python environment)
+enable_plugins = true
+
+[file_roots]
+base = ["/srv/salt"]
+prod = ["/srv/salt/prod"]
+
+[targets.production_web]
+expression = "G@roles:web and G@env:prod"
+type = "compound"

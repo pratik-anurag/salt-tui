@@ -1,0 +1,7 @@
+{
+  "local": [
+    {"__id__": "nginx-package", "__sls__": "nginx.init", "state": "pkg", "fun": "installed", "name": "nginx"},
+    {"__id__": "nginx-config", "__sls__": "nginx.config", "state": "file", "fun": "managed", "name": "/etc/nginx/nginx.conf", "require": [{"pkg": "nginx-package"}]},
+    {"__id__": "nginx-service", "__sls__": "nginx.service", "state": "service", "fun": "running", "name": "nginx", "watch": [{"file": "nginx-config"}]}
+  ]
+}
