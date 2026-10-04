@@ -4,7 +4,7 @@ A Textual frontend for Salt CLI operations, structured state returns, local hist
 
 ## Install
 
-Python 3.11 or newer and `pipx` are required. The package uses an isolated pipx environment and does not install into Salt's Python runtime. Once a release is published on PyPI:
+Python 3.11 or newer and `pipx` are required. The package uses an isolated pipx environment and does not install into Salt's Python runtime. Install from PyPI with:
 
 ```sh
 pipx install salt-tui
@@ -26,7 +26,7 @@ salt-tui
 python -m salt_tui --version
 ```
 
-To test a local release artifact, run `python -m build` and then `pipx install ./dist/salt_tui-0.1.0-py3-none-any.whl`. Use the wheel name for the version you built. Salt CLI executables are discovered at runtime on `PATH`; Salt is not a Python dependency of this package.
+To test a local release artifact, run `python -m build` and then `pipx install ./dist/salt_tui-X.Y.Z-py3-none-any.whl`. Replace `X.Y.Z` with the version you built. Salt CLI executables are discovered at runtime on `PATH`; Salt is not a Python dependency of this package.
 
 Without Salt binaries, the UI opens with capability information and retains local history and SLS browsing. With `salt`, master commands are available; `salt-call` enables local minion commands. The app also detects `salt-run` and `salt-key` for their supported views. Live Salt behavior depends on the installed Salt CLI and access to a Salt environment. This package has been exercised on macOS; Linux is used in CI.
 
@@ -55,9 +55,9 @@ salt-tui diagnostics --output ./salt-tui-diagnostics.zip
 
 Configuration is read from `~/.config/salt-tui/config.toml` (or `$XDG_CONFIG_HOME/salt-tui/config.toml`). Copy `sample-config.toml` and adapt command paths and file roots. History defaults to `$XDG_DATA_HOME/salt-tui/history.db` or `~/.local/share/salt-tui/history.db`. It does not write into Salt's cache.
 
-See [architecture](docs/architecture.md), [plugin API](docs/plugins.md), [keyboard shortcuts](docs/keys.md), and the [release checklist](docs/releasing.md).
+See [architecture](https://github.com/pratik-anurag/salt-tui/blob/main/docs/architecture.md), [plugin API](https://github.com/pratik-anurag/salt-tui/blob/main/docs/plugins.md), [keyboard shortcuts](https://github.com/pratik-anurag/salt-tui/blob/main/docs/keys.md), and the [release checklist](https://github.com/pratik-anurag/salt-tui/blob/main/docs/releasing.md).
 
-![Dashboard preview](docs/dashboard.svg)
+![Salt TUI dashboard preview](https://raw.githubusercontent.com/pratik-anurag/salt-tui/main/docs/screenshots/dashboard.png)
 
-![Event stream preview](docs/events.svg)
+![Salt TUI event stream preview](https://raw.githubusercontent.com/pratik-anurag/salt-tui/main/docs/screenshots/events.png)
 

@@ -4,7 +4,7 @@ Versions use `MAJOR.MINOR.PATCH` with optional `aN`, `bN`, or `rcN` prerelease s
 
 ## Repository setup
 
-The release workflow assumes this project is at the root of `https://github.com/pratik-anurag/salt-tui`. At packaging time, its `main` branch contained only `LICENSE`; add the packaged project files and workflows to that repository before tagging. Create a GitHub environment named `pypi`. On PyPI, configure a Trusted Publisher for that repository, workflow `.github/workflows/release.yml`, and environment `pypi`. The workflow uses OpenID Connect and does not need a stored PyPI API token. The repository was reachable with Git credentials but its web page was not publicly visible, so confirm the intended visibility before release.
+The project is hosted at `https://github.com/pratik-anurag/salt-tui`. The GitHub `pypi` environment and PyPI Trusted Publisher are configured for `.github/workflows/release.yml`. The workflow uses OpenID Connect and does not need a stored PyPI API token.
 
 ## Preflight
 
