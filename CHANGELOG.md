@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Browse local state files as a tree or query Salt for states available to a target and environment.
+- Test a selected SLS, review planned changes, and apply it with an explicit target and command confirmation.
+- Track synchronous and live runs together, including missing returns, failed-state source links, and run logs.
+
 ## 0.1.3
 
 - Add SLS-specific keyboard guidance, clearer action names, a selected-view label, and compile progress and error feedback.

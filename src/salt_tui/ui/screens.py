@@ -15,7 +15,7 @@ from textual.widgets import Button, DataTable, Footer, Header, Input, LoadingInd
 from salt_tui.models import CommandSpec
 from salt_tui.salt.commands import build_argv, display_argv, is_mutating, parse_line
 from salt_tui.salt.jobs import parse_jobs
-from salt_tui.sls.explorer import files, sls_name
+from salt_tui.sls.explorer import available_states, files, local_tree_rows, sls_name
 from salt_tui.sls.dependencies import tree_lines
 from salt_tui.sls.syntax import SaltSlsLexer
 from salt_tui.sls.graph import StateGraph
@@ -35,6 +35,13 @@ def pretty(value: Any) -> str:
         return str(value)
 
 
+def format_state_changes(value: Any) -> str:
+    if isinstance(value, dict) and isinstance(value.get("diff"), str):
+        remainder = {key: item for key, item in value.items() if key != "diff"}
+        return value["diff"] + ("\n\nOther changes:\n" + pretty(remainder) if remainder else "")
+    return pretty(value)
+
+
 class ConfirmScreen(ModalScreen[bool]):
     DEFAULT_CSS = """
     ConfirmScreen { align: center middle; background: $background 70%; }
@@ -42,15 +49,16 @@ class ConfirmScreen(ModalScreen[bool]):
     #confirm_text { height: auto; margin-bottom: 1; }
     """
 
-    def __init__(self, message: str):
+    def __init__(self, message: str, confirm_label: str = "Execute"):
         super().__init__()
         self.message = message
+        self.confirm_label = confirm_label
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm_box"):
             yield Static(self.message, id="confirm_text")
             with Horizontal():
-                yield Button("Execute", id="yes", variant="warning")
+                yield Button(self.confirm_label, id="yes", variant="warning")
                 yield Button("Cancel", id="no")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -127,10 +135,8 @@ class DashboardScreen(BaseScreen):
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row = self.rows.get(str(event.row_key.value))
-        if row and row["status"] == "running" and row["jid"]:
+        if row:
             self.shell.open_live_run(int(event.row_key.value))
-        else:
-            self.shell.open_run(int(event.row_key.value))
 
 
 class SettingsScreen(BaseScreen):
@@ -376,10 +382,8 @@ class HistoryScreen(TableScreen):
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row = self.rows.get(str(event.row_key.value))
-        if row and row["status"] == "running" and row["jid"]:
+        if row:
             self.shell.open_live_run(int(event.row_key.value))
-        else:
-            self.shell.open_run(int(event.row_key.value))
 
     def action_compare(self) -> None:
         table = self.query_one("#table", DataTable)
@@ -521,62 +525,173 @@ class MinionsScreen(TableScreen):
 
 
 class SlsScreen(BaseScreen):
-    title_text = "SLS explorer — source on disk; compiled views come from Salt"
+    title_text = "SLS explorer — local source and states available from Salt"
 
     def content(self) -> ComposeResult:
-        yield Static("↑/↓ Select file  ·  Shift+Tab Choose action  ·  Enter Activate  ·  Esc Back", id="sls-hint")
+        yield Static("↑/↓ Select state  ·  Shift+Tab Choose action  ·  Enter Activate  ·  Esc Back", id="sls-hint")
         with Horizontal(classes="toolbar"):
+            yield Button("Local files", id="local_mode", variant="primary")
+            yield Button("From Salt", id="salt_mode")
             yield Input(value=self.shell.settings.default_saltenv, id="env", placeholder="saltenv")
-            yield Input(value=(self.shell.current_sls or "").replace(".", "/"), placeholder="Filter files", id="filter")
+            yield Input(value=(self.shell.current_sls or "").replace(".", "/"), placeholder="Filter states", id="filter")
+            yield Input(value="local", id="state_target", placeholder="local or Salt target")
+            yield Input(value="glob", id="state_target_type", placeholder="target type", classes="target-type")
+        yield Static("Inputs: env · filter · target (local/minions) · type", id="sls-fields")
+        with Horizontal(classes="toolbar"):
             yield Button("Reload", id="reload")
+            yield Button("Test state", id="test_state", variant="primary")
+            yield Button("Apply state", id="apply_state", variant="warning")
             yield Button("Rendered state", id="high")
             yield Button("Execution steps", id="low")
             yield Button("Dependencies", id="deps")
         yield Static("Rendered state: state.show_sls  ·  Execution steps: state.show_low_sls", id="sls-functions")
         yield Static("", id="sls-status")
         yield LoadingIndicator(id="sls-loading")
+        yield Button("Open Settings to configure file_roots", id="roots_help")
         with Horizontal(id="split"):
             yield DataTable(id="files", cursor_type="row")
             with Vertical(id="sls-detail"):
                 yield Static("Source · Select a file", id="source-title")
+                yield Static("", id="source-origin")
                 with VerticalScroll(id="detail-scroll"):
                     yield Static("Select an SLS file", id="source")
 
     async def on_mount(self) -> None:
-        self.query_one("#files", DataTable).add_columns("Path", "SLS")
+        self.source_mode = "local"
+        self.rows: dict[str, tuple[str | None, Path | None, str | None]] = {}
+        self.paths: dict[str, tuple[str, Path]] = {}
+        self.query_one("#roots_help", Button).display = False
+        self.query_one("#files", DataTable).add_columns("State tree", "SLS", "Origin")
         await self.refresh_data()
         self.query_one("#files", DataTable).focus()
+        self._set_compact_labels(self.size.width < 100)
+
+    def on_resize(self, event) -> None:
+        self._set_compact_labels(event.size.width < 100)
+
+    def _set_compact_labels(self, compact: bool) -> None:
+        labels = ({"test_state": "Test", "apply_state": "Apply", "high": "Rendered",
+                   "low": "Low steps", "deps": "Deps"} if compact else
+                  {"test_state": "Test state", "apply_state": "Apply state", "high": "Rendered state",
+                   "low": "Execution steps", "deps": "Dependencies"})
+        for button_id, label in labels.items():
+            self.query_one(f"#{button_id}", Button).label = label
 
     async def refresh_data(self) -> None:
-        env = self.query_one("#env", Input).value
+        env = self.query_one("#env", Input).value.strip() or self.shell.settings.default_saltenv
         term = self.query_one("#filter", Input).value.lower()
-        self.paths = {str(p): (rel, p) for rel, p in await asyncio.to_thread(files, self.shell.settings, env) if term in rel.lower()}
-        table = self.query_one("#files", DataTable); table.clear()
-        for key, (rel, _) in self.paths.items():
-            table.add_row(rel, sls_name(rel) or "", key=key)
-        if not self.paths:
-            self.query_one("#source", Static).update(f"No files found for {env}. Configure file_roots in config.toml.")
-            self.query_one("#source-title", Static).update("Source · No files")
-            self.query_one("#sls-status", Static).update("No files in the selected environment")
-            self._set_actions_enabled(False)
+        target = self.query_one("#state_target", Input).value.strip()
+        previous = self.shell.current_sls
+        self.rows = {}
+        self.paths = {}
+        table = self.query_one("#files", DataTable)
+        table.clear()
+        self.shell.current_sls = None
+        self._set_actions_enabled(False)
+        roots_help = self.query_one("#roots_help", Button)
+        roots_help.display = False
+        if self.source_mode == "local":
+            found = [(rel, path) for rel, path in await asyncio.to_thread(files, self.shell.settings, env)
+                     if term in rel.lower() or term in (sls_name(rel) or "").lower()]
+            relative_by_path = {path: rel for rel, path in found}
+            for key, label, sls, path in local_tree_rows(found):
+                relative = relative_by_path.get(path) if path else None
+                self.rows[key] = (relative, path, sls)
+                if path and relative:
+                    self.paths[key] = (relative, path)
+                table.add_row(label, sls or "", "Local" if path else "", key=key)
+            if not found:
+                roots_help.display = True
+                self.query_one("#source", Static).update(
+                    f"No local files found for {env}. Configure [file_roots] in Settings, or choose From Salt.")
+                self.query_one("#source-title", Static).update("Source · No local files")
+                self.query_one("#source-origin", Static).update("Local [file_roots] is empty or not accessible")
+                self.query_one("#sls-status", Static).update(f"Local roots: {', '.join(map(str, self.shell.settings.file_roots.get(env, []))) or 'none'}")
+            else:
+                self.query_one("#sls-status", Static).update(f"Local files · {len(found)} files · environment {env}")
+        else:
+            if not target:
+                self.query_one("#sls-status", Static).update("Enter local or a Salt target before loading states")
+                return
+            spec = self._selected_spec("cp.list_states", [], env, target)
+            self.query_one("#sls-status", Static).update(f"Asking Salt for states on {target}…")
+            self.query_one("#sls-loading", LoadingIndicator).display = True
+            try:
+                run = await self.shell.execute(spec)
+                if run.status == "failed":
+                    raise RuntimeError(run.stderr or run.stdout or "Salt could not list states")
+                if run.parsed and not (isinstance(run.parsed, list) or
+                                       isinstance(run.parsed, dict) and any(isinstance(value, list) for value in run.parsed.values())):
+                    raise RuntimeError(pretty(run.parsed))
+                counts = available_states(run.parsed)
+                for sls, count in counts.items():
+                    if term and term not in sls.lower():
+                        continue
+                    key = f"salt:{sls}"
+                    self.rows[key] = (None, self._local_path(env, sls), sls)
+                    table.add_row(sls.replace(".", "/"), sls, f"Salt · {count} minion{'s' if count != 1 else ''}", key=key)
+                self.query_one("#sls-status", Static).update(f"Salt reports {len(counts)} states for {target} · environment {env}")
+                if not counts:
+                    self.query_one("#source-title", Static).update("Salt · No states")
+                    self.query_one("#source-origin", Static).update(f"Salt target: {target} · environment: {env}")
+                    self.query_one("#source", Static).update("Salt returned no available states for this target and environment.")
+            except Exception as exc:
+                message = self.shell.client.redactor.text(str(exc))
+                self.query_one("#sls-status", Static).update("Could not list states from Salt")
+                self.query_one("#source", Static).update(message[:100000])
+                self.notify(message[:180], severity="error")
+            finally:
+                self.query_one("#sls-loading", LoadingIndicator).display = False
+        keys = list(self.rows)
+        selected = next((i for i, key in enumerate(keys) if self.rows[key][2] == previous and self.rows[key][2]), None)
+        if selected is None:
+            selected = next((i for i, key in enumerate(keys) if self.rows[key][2]), None)
+        if selected is not None:
+            table.move_cursor(row=selected)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         await self.refresh_data()
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id in {"local_mode", "salt_mode"}:
+            self.source_mode = "local" if event.button.id == "local_mode" else "salt"
+            self.query_one("#local_mode", Button).variant = "primary" if self.source_mode == "local" else "default"
+            self.query_one("#salt_mode", Button).variant = "primary" if self.source_mode == "salt" else "default"
+            await self.refresh_data(); return
+        if event.button.id == "roots_help":
+            self.shell.show_screen("settings"); return
         if event.button.id == "reload":
             await self.refresh_data(); return
+        if event.button.id in {"test_state", "apply_state"}:
+            await self.run_state(test=event.button.id == "test_state"); return
         if event.button.id in {"high", "low", "deps"}:
             await self.compiled(event.button.id)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        entry = self.paths.get(str(event.row_key.value))
+        entry = self.rows.get(str(event.row_key.value))
         if not entry: return
-        rel, path = entry
-        self.shell.current_sls = sls_name(rel)
-        self.query_one("#source-title", Static).update(f"Source · {rel}")
-        self.query_one("#sls-status", Static).update(f"Selected {rel}  ·  {len(self.paths)} files")
-        self._set_actions_enabled(self.shell.current_sls is not None)
+        rel, path, sls = entry
+        self.shell.current_sls = sls
+        self._set_actions_enabled(sls is not None)
+        if not sls:
+            self.query_one("#source-title", Static).update(f"Local directory · {str(event.row_key.value).split(':')[-1]}")
+            self.query_one("#source-origin", Static).update("Choose a file in the tree")
+            self.query_one("#sls-status", Static).update("Local directory selected")
+            self.query_one("#source", Static).update("Choose an SLS file below this directory.")
+            return
+        self.query_one("#source-title", Static).update(f"Source · {rel or sls}")
+        self.query_one("#sls-status", Static).update(f"Selected {sls} · {'Local file' if rel else 'Reported by Salt'}")
+        origin = self.query_one("#source-origin", Static)
+        origin.update(
+            f"Local path: {path}" if self.source_mode == "local" and path else
+            f"Salt target: {self.query_one('#state_target', Input).value.strip()} · "
+            + (f"matching local source: {path}" if path else "no matching local source"))
+        origin.tooltip = str(path) if path else "Salt reports this state; no matching local source was found"
+        if path is None:
+            self.query_one("#source", Static).update(
+                f"Salt reports {sls}, but no matching local source exists under configured file_roots.\n"
+                "Compiled views and state execution remain available.")
+            return
         try:
             text = self.shell.client.redactor.text(path.read_text(errors="replace"))
             lang = SaltSlsLexer() if path.suffix == ".sls" else "jinja" if path.suffix in {".jinja", ".j2"} else "yaml" if path.suffix in {".yaml", ".yml"} else "json" if path.suffix == ".json" else "text"
@@ -584,16 +699,55 @@ class SlsScreen(BaseScreen):
         except OSError as exc:
             self.query_one("#source", Static).update(str(exc))
 
+    def _local_path(self, env: str, sls: str) -> Path | None:
+        relative = Path(*sls.split("."))
+        for root in self.shell.settings.file_roots.get(env, []):
+            for candidate in (root / relative.with_suffix(".sls"), root / relative / "init.sls"):
+                if candidate.is_file():
+                    return candidate
+        return None
+
+    def _selected_spec(self, function: str, arguments: list[str], env: str, target: str, *, test: bool = False) -> CommandSpec:
+        if not target:
+            raise ValueError("Enter local or a Salt target")
+        target_type = self.query_one("#state_target_type", Input).value.strip().lower() or "glob"
+        if target_type not in {"glob", "grain", "pillar", "compound", "nodegroup", "list", "pcre"}:
+            raise ValueError("Target type must be glob, grain, pillar, compound, nodegroup, list, or pcre")
+        return CommandSpec(executable="salt-call" if target == "local" else "salt", function=function,
+                           target=target, target_type=target_type if target != "local" else "glob",
+                           arguments=arguments, saltenv=env, test=test)
+
+    async def run_state(self, *, test: bool) -> None:
+        sls = self.shell.current_sls
+        if not sls:
+            self.notify("Select an SLS state", severity="warning"); return
+        try:
+            spec = self._selected_spec("state.apply", [sls], self.query_one("#env", Input).value.strip(),
+                                       self.query_one("#state_target", Input).value.strip(), test=test)
+            status = self.query_one("#sls-status", Static)
+            loading = self.query_one("#sls-loading", LoadingIndicator)
+            status.update(f"{'Testing' if test else 'Preparing to apply'} {sls} on {spec.target}…")
+            loading.display = True
+            self._set_actions_enabled(False)
+            await self.shell.start_state_workflow(spec)
+            status.update(f"{'Dry run complete' if test else 'Awaiting confirmation'} for {sls}")
+        except Exception as exc:
+            self.notify(self.shell.client.redactor.text(str(exc))[:180], severity="error")
+        finally:
+            self.query_one("#sls-loading", LoadingIndicator).display = False
+            self._set_actions_enabled(self.shell.current_sls is not None)
+
     async def compiled(self, mode: str) -> None:
         sls = self.shell.current_sls
         if not sls:
             self.notify("Select an SLS file", severity="warning"); return
         fn = "state.show_low_sls" if mode in {"low", "deps"} else "state.show_sls"
         label = "Dependencies" if mode == "deps" else "Execution steps" if mode == "low" else "Rendered state"
-        local = self.shell.capabilities is None or self.shell.capabilities.executables.get("salt-call", False)
-        spec = CommandSpec(executable="salt-call" if local else "salt", function=fn,
-                           target="local" if local else self.shell.settings.default_target,
-                           arguments=[sls], saltenv=self.query_one("#env", Input).value)
+        try:
+            spec = self._selected_spec(fn, [sls], self.query_one("#env", Input).value.strip(),
+                                       self.query_one("#state_target", Input).value.strip())
+        except ValueError as exc:
+            self.notify(str(exc), severity="error"); return
         status = self.query_one("#sls-status", Static)
         loading = self.query_one("#sls-loading", LoadingIndicator)
         source = self.query_one("#source", Static)
@@ -627,18 +781,92 @@ class SlsScreen(BaseScreen):
             self._set_actions_enabled(self.shell.current_sls is not None)
 
     def _set_actions_enabled(self, enabled: bool) -> None:
-        for button_id in ("high", "low", "deps"):
+        for button_id in ("high", "low", "deps", "test_state", "apply_state"):
             self.query_one(f"#{button_id}", Button).disabled = not enabled
 
     async def select_source(self, sls: str) -> None:
         self.query_one("#filter", Input).value = sls.replace(".", "/")
         await self.refresh_data()
         table = self.query_one("#files", DataTable)
-        for index, (_, (relative, _)) in enumerate(self.paths.items()):
-            if sls_name(relative) == sls:
+        for index, entry in enumerate(self.rows.values()):
+            if entry[2] == sls:
                 table.move_cursor(row=index)
                 return
         self.notify(f"Source file for {sls} not found in configured roots", severity="warning")
+
+
+class StateReviewScreen(BaseScreen):
+    title_text = "Dry-run review — inspect planned changes before applying"
+
+    def content(self) -> ComposeResult:
+        yield Static("", id="review_summary")
+        yield Static("↑/↓ Inspect planned changes · Shift+Tab Choose action · Enter Activate · Esc Back", id="review_hint")
+        with Horizontal(classes="toolbar"):
+            yield Button("Apply this state", id="review_apply", variant="warning")
+            yield Button("Run tracker", id="review_tracker")
+            yield Button("State results", id="review_results")
+            yield Button("Open source", id="review_source")
+        with Horizontal(id="split"):
+            yield DataTable(id="review_table", cursor_type="row")
+            with VerticalScroll(id="detail-scroll"):
+                yield Static("Select a result", id="review_detail")
+
+    async def on_mount(self) -> None:
+        self.query_one("#review_table", DataTable).add_columns("Result", "Minion", "State ID", "Change", "Comment")
+        await self.refresh_data()
+        self.query_one("#review_table", DataTable).focus()
+
+    async def refresh_data(self) -> None:
+        run_id = self.shell.review_run_id
+        if run_id is None:
+            self.query_one("#review_summary", Static).update("No dry run selected. Test a state from SLS Explorer.")
+            self.query_one("#review_apply", Button).disabled = True
+            return
+        run = await self.shell.db.run(run_id)
+        rows = await self.shell.db.states(run_id)
+        self.rows = {str(row["id"]): row for row in rows}
+        table = self.query_one("#review_table", DataTable)
+        table.clear()
+        planned = failed = 0
+        preferred: int | None = None
+        for index, (key, row) in enumerate(self.rows.items()):
+            changes = json.loads(row["changes_json"])
+            changed = bool(changes)
+            planned += int(changed and row["result"] is None)
+            failed += int(row["result"] == 0)
+            if row["result"] == 0 or (preferred is None and changed and row["result"] is None):
+                preferred = index
+            result = "FAIL" if row["result"] == 0 else "PLAN" if row["result"] is None else "PASS"
+            table.add_row(result, row["minion_id"], row["state_id"], "Yes" if changed else "No",
+                          (row["comment"] or "")[:80], key=key)
+        if self.rows:
+            table.move_cursor(row=preferred or 0)
+        if run:
+            self.query_one("#review_summary", Static).update(
+                f"Run #{run_id} · {run['status'].upper()} · target {run['target_expression']} · "
+                f"environment {run['saltenv'] or 'base'} · {len(rows)} states · "
+                f"{planned} planned changes · {failed} failures")
+            if not rows:
+                self.query_one("#review_detail", Static).update(run["stderr"] or run["stdout"] or "Salt returned no state results.")
+        self.query_one("#review_apply", Button).disabled = self.shell.review_spec is None
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        row = self.rows.get(str(event.row_key.value))
+        if row:
+            self.query_one("#review_detail", Static).update(
+                f"{row['minion_id']} · {row['sls']} · {row['state_id']}\n"
+                f"Result: {'failed' if row['result'] == 0 else 'planned' if row['result'] is None else 'passed'}\n\n"
+                f"{row['comment']}\n\nChanges:\n{format_state_changes(json.loads(row['changes_json']))}")
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "review_apply" and self.shell.review_spec:
+            await self.shell.start_state_workflow(replace(self.shell.review_spec, test=False))
+        elif event.button.id == "review_tracker" and self.shell.review_run_id:
+            self.shell.open_live_run(self.shell.review_run_id)
+        elif event.button.id == "review_results" and self.shell.review_run_id:
+            self.shell.open_run(self.shell.review_run_id)
+        elif event.button.id == "review_source" and self.shell.review_spec:
+            self.shell.open_source(self.shell.review_spec.arguments[0])
 
 
 class JobsScreen(BaseScreen):

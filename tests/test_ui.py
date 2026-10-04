@@ -18,7 +18,7 @@ async def test_screen_navigation(tmp_path: Path):
     app = SaltTUI(Settings(database=tmp_path / "history.db"))
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        for name in ("command", "minions", "states", "matrix", "sls", "graph", "history", "logs", "failures", "intelligence", "performance", "runner", "orchestration", "targets", "settings", "events", "live", "dashboard"):
+        for name in ("command", "minions", "states", "matrix", "sls", "review", "graph", "history", "logs", "failures", "intelligence", "performance", "runner", "orchestration", "targets", "settings", "events", "live", "dashboard"):
             app.action_show(name)
             await pilot.pause()
             assert app.screen is app.get_screen(name)
