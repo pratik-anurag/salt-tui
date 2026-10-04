@@ -1,25 +1,23 @@
 # Releasing Salt TUI
 
-Versions use `MAJOR.MINOR.PATCH` with optional `aN`, `bN`, or `rcN` prerelease suffixes. The package version in `pyproject.toml` is authoritative. Release tags have a leading `v`, such as `v0.1.0` or `v0.2.0rc1`. The installed `salt-tui --version` reads distribution metadata.
+Versions use `MAJOR.MINOR.PATCH` with optional `aN`, `bN`, or `rcN` prerelease suffixes. Release tags have a leading `v`. The installed `salt-tui --version` reads distribution metadata.
 
-## Repository setup
+## Automatic releases
 
-The project is hosted at `https://github.com/pratik-anurag/salt-tui`. The GitHub `pypi` environment and PyPI Trusted Publisher are configured for `.github/workflows/release.yml`. The workflow uses OpenID Connect and does not need a stored PyPI API token.
+The [release workflow](../.github/workflows/release.yml) checks every Monday at 08:00 Asia/Kolkata (02:30 UTC). The first eligible date is 19 October 2026 and the cadence is every other Monday after that. GitHub Actions runs scheduled workflows on the default branch and may delay or omit a scheduled run during high load. The script accepts a delayed run during its scheduled week; an omitted run waits until the next eligible fortnight.
 
-## Preflight
+An eligible run compares `main` with its latest reachable version tag. If there are no new commits, it exits without building or publishing. Otherwise it increases the patch version, moves the `Unreleased` changelog entries under that version, runs tests, builds and validates the wheel and source distribution, commits the version change to `main`, creates the tag, and publishes to PyPI. A failed test or build stops before committing or tagging. A push rejected because `main` moved also stops publication.
 
-1. Confirm main branch CI passes and update `CHANGELOG.md`.
-2. Set the new version in `pyproject.toml`; do not add a leading `v` there.
-3. Build locally: `python -m build`.
-4. Validate: `python -m twine check dist/*` and `python scripts/check_dist.py`.
-5. Test a clean wheel with pipx, including `salt-tui --help` and `salt-tui --version`.
-6. Confirm the version is unused on PyPI and the repository's Trusted Publisher is configured.
-7. Commit, tag `vX.Y.Z`, and push the tag. Only a version tag triggers publication.
-8. Check the GitHub Actions release run and the published PyPI artifacts.
-9. Verify `pipx install salt-tui` and `salt-tui --version` from PyPI. For an upgrade, use `pipx upgrade salt-tui`.
+The GitHub `pypi` environment and PyPI Trusted Publisher are configured for `.github/workflows/release.yml`. Publishing uses OpenID Connect; there is no stored PyPI API token. The scheduled job needs permission to push a release commit and tag to `main`. If branch rules prevent GitHub Actions from pushing, adjust those rules or use a different authorized release method before the first scheduled run.
 
-The release workflow checks the tag against the package version, rejects an existing PyPI version, runs tests, builds both distributions, validates metadata and included files, and publishes with the official PyPA action. Database migrations happen when the app starts, never during installation.
+To retry a failed publication after a tag has been created, manually run the **Release** workflow with that existing tag as its `tag` input. A version already on PyPI cannot be uploaded again. Do not create a new tag for the same version.
+
+## Manual releases
+
+For a minor, major, or prerelease version, set the new version in `pyproject.toml`, update `CHANGELOG.md`, run `python -m pytest -q`, `python -m build`, `python -m twine check dist/*`, and `python scripts/check_dist.py`. Test the wheel with pipx, confirm the version is unused on PyPI, commit, and push a matching `vX.Y.Z` tag. The tag triggers the same release workflow. Verify the GitHub Actions run and published PyPI artifacts, then test `pipx install salt-tui` and `salt-tui --version`.
+
+Database migrations happen when the app starts, never during installation.
 
 ## TestPyPI
 
-For an optional manual rehearsal, build the distributions and upload them with `python -m twine upload --repository testpypi dist/*`. Use a unique prerelease version because TestPyPI versions cannot be overwritten. Copy the exact wheel download URL from the TestPyPI release page and install that URL with `pipx install 'https://test-files.pythonhosted.org/.../salt_tui-X.Y.Z-py3-none-any.whl'`. Pipx will resolve runtime dependencies from PyPI while the project wheel comes from TestPyPI. Do not treat a TestPyPI upload as authorization to publish to PyPI.
+For an optional rehearsal, build the distributions and upload them with `python -m twine upload --repository testpypi dist/*`. Use a unique prerelease version because TestPyPI versions cannot be overwritten. Install the exact wheel URL shown on TestPyPI with pipx. Pipx resolves runtime dependencies from PyPI while the project wheel comes from TestPyPI.
