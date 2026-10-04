@@ -1,0 +1,57 @@
+name: Bug report
+description: Report unexpected Salt TUI behavior
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Search existing issues first. Do not include credentials, tokens, or sensitive
+        Salt output. Report suspected vulnerabilities privately as described in SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Salt TUI version
+      description: Run `salt-tui --version`.
+      placeholder: "0.1.3"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Python version, and relevant Salt CLI versions.
+      placeholder: "Ubuntu 24.04, Python 3.12, salt-call 3007"
+    validations:
+      required: true
+  - type: dropdown
+    id: salt-mode
+    attributes:
+      label: Salt mode
+      options:
+        - Local salt-call
+        - Master target
+        - No Salt installed
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the screen, keys or command, target type, and sanitized sample data where relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Add a sanitized error message or screenshot if useful.
+    validations:
+      required: true
