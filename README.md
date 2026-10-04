@@ -61,6 +61,3 @@ See [architecture](docs/architecture.md), [plugin API](docs/plugins.md), [keyboa
 
 ![Event stream preview](docs/events.svg)
 
-## Scope and limitations
-
-Stage 2 adds event streaming, live JID-correlated master state runs, compiled graph navigation, source links, combined history search, recurring failure patterns, slow-state analysis, runner execution, orchestration, and structured job inspection. Per-state progress requires Salt's `state_events` support. The TUI tries the Salt Python event API first, then `salt-run state.event`. If neither is available, the event screen reports that the bus is unavailable and `Run Live` is disabled. Rich minion metadata, broad target match counts, and full command autocomplete remain future work. The command runner supports arbitrary Salt CLI arguments; Salt-specific option ordering should be entered as a normal CLI line.
