@@ -7,6 +7,8 @@ import logging
 from typing import Any
 
 from textual.app import App
+from textual.screen import ModalScreen
+from textual.widgets import Static
 
 from salt_tui.config import Settings
 from salt_tui.models import CommandSpec, RunResult
@@ -42,6 +44,15 @@ class SaltTUI(App):
     #table, #files { width: 55%; height: 1fr; }
     #detail-scroll { width: 45%; height: 1fr; border-left: solid $primary; }
     #detail, #source { padding: 1; width: auto; height: auto; }
+    .breadcrumb { height: 1; padding: 0 1; color: $text-muted; }
+    #sls-hint, #sls-functions, #sls-status { height: 1; padding: 0 1; }
+    #sls-hint { color: $text-muted; }
+    #sls-functions { color: $text-muted; }
+    #sls-status { color: $accent; }
+    #sls-loading { height: 1; display: none; }
+    #sls-detail { width: 45%; height: 1fr; border-left: solid $primary; }
+    #sls-detail #detail-scroll { width: 100%; border: none; }
+    #source-title { height: 1; padding: 0 1; text-style: bold; background: $surface; }
     .toolbar { height: 3; }
     .toolbar Input { width: 1fr; }
     .toolbar Button { min-width: 12; }
@@ -70,6 +81,7 @@ class SaltTUI(App):
         ("ctrl+m", "show('matrix')", "State matrix"),
         ("exclamation_mark", "show('failures')", "Failures"),
         ("ctrl+r", "refresh", "Refresh"), ("question_mark", "help", "Help"),
+        ("escape", "back", "Back"),
         ("q", "quit", "Quit"),
     ]
 
@@ -93,6 +105,8 @@ class SaltTUI(App):
         self.current_graph: StateGraph | None = None
         self.selected_target: dict | None = None
         self.initial = initial
+        self._current_screen_name = initial
+        self._screen_history: list[str] = []
         self.initial_command = command
         self._busy = False
         self._fallback_dir: tempfile.TemporaryDirectory | None = None
@@ -214,17 +228,17 @@ class SaltTUI(App):
 
     def open_run(self, run_id: int) -> None:
         self.current_run_id = run_id
-        self.switch_screen("states")
+        self.show_screen("states")
         self.screen.call_after_refresh(self.screen.refresh_data)
 
     def open_live_run(self, run_id: int) -> None:
         self.current_run_id = run_id
-        self.switch_screen("live")
+        self.show_screen("live")
         self.screen.call_after_refresh(self.screen.refresh_data)
 
     def open_source(self, sls: str, state_id: str = "") -> None:
         self.current_sls = sls
-        self.switch_screen("sls")
+        self.show_screen("sls")
         async def locate() -> None:
             await self.screen.select_source(sls)
             result = locate_source(self.settings, self.settings.default_saltenv, sls, state_id) if state_id else None
@@ -233,7 +247,7 @@ class SaltTUI(App):
         self.screen.call_after_refresh(locate)
 
     def open_command(self, line: str) -> None:
-        self.switch_screen("command")
+        self.show_screen("command")
         def fill() -> None:
             self.screen.query_one("#command").value = line
         self.screen.call_after_refresh(fill)
@@ -251,9 +265,37 @@ class SaltTUI(App):
         self.open_command(display_argv(build_argv(spec, self.settings)))
 
     def action_show(self, name: str) -> None:
-        self.switch_screen(name)
+        self.show_screen(name)
         if hasattr(self.screen, "refresh_data"):
             self.screen.call_after_refresh(self.screen.refresh_data)
+
+    def show_screen(self, name: str, *, remember: bool = True) -> None:
+        if name != self._current_screen_name:
+            if remember:
+                self._screen_history.append(self._current_screen_name)
+            self._current_screen_name = name
+        self.switch_screen(name)
+        self._update_breadcrumb()
+
+    def breadcrumb_text(self) -> str:
+        names = {"sls": "SLS Explorer", "graph": "Dependencies", "states": "State Results"}
+        trail = (self._screen_history[-2:] + [self._current_screen_name])
+        return " › ".join(names.get(name, name.replace("_", " ").title()) for name in trail)
+
+    def _update_breadcrumb(self) -> None:
+        breadcrumb = self.screen.query(".breadcrumb")
+        if breadcrumb:
+            breadcrumb.first().update(self.breadcrumb_text())
+
+    def action_back(self) -> None:
+        if isinstance(self.screen, ModalScreen):
+            return
+        if self._screen_history:
+            self.show_screen(self._screen_history.pop(), remember=False)
+        elif self._current_screen_name != "dashboard":
+            self.show_screen("dashboard", remember=False)
+        if isinstance(self.screen, SlsScreen):
+            self.screen.query_one("#files").focus()
 
     def action_refresh(self) -> None:
         if isinstance(self.screen, MinionsScreen):

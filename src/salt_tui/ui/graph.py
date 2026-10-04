@@ -29,6 +29,7 @@ class GraphScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static(self.shell.breadcrumb_text(), classes="breadcrumb")
         yield Static("Compiled state graph — Salt low data", classes="page-title")
         with Horizontal(classes="toolbar"):
             yield Input(placeholder="State search", id="graph_search")

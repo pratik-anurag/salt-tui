@@ -36,7 +36,7 @@ Without Salt binaries, the UI opens with capability information and retains loca
 
 `Ctrl+M` opens a paged state × minion matrix for the selected run, with fleet drift filters and per-state details.
 
-To inspect state files, press `s` for the SLS Explorer. Its left table lists files under the configured `file_roots`; use the arrow keys to select one and read its source on the right. For the rendered Salt view, select an `.sls` file and use `show_sls` or `show_low_sls`. The **Dependencies** button builds a graph from the compiled low state. The `r` screen shows results from a selected run in Salt TUI history; it does not list source files. If the SLS Explorer is empty, set `[file_roots]` in `config.toml` to the directory containing your Salt states, such as `base = ["/srv/salt"]`.
+To inspect state files, press `s` for the SLS Explorer. Its left table lists files under the configured `file_roots`; use the arrow keys to select one and read its source on the right. Press Shift+Tab to focus an action and Enter to activate it, or click its button. **Rendered state** runs `state.show_sls`, **Execution steps** runs `state.show_low_sls`, and **Dependencies** builds a graph from the compiled low state. Press Esc to return to the previous screen. The `r` screen shows results from a selected run in Salt TUI history; it does not list source files. If the SLS Explorer is empty, set `[file_roots]` in `config.toml` to the directory containing your Salt states, such as `base = ["/srv/salt"]`.
 
 Direct entry points open the corresponding screen:
 

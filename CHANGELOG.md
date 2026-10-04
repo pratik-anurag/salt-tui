@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3
+
+- Add SLS-specific keyboard guidance, clearer action names, a selected-view label, and compile progress and error feedback.
+- Add screen breadcrumbs and Esc navigation to the previous screen.
+
 ## 0.1.2
 
 - Make keyboard selection work in SLS Explorer and other row-based tables.

@@ -8,6 +8,8 @@
 | r | State results |
 | s | SLS explorer |
 | Up / Down (SLS explorer) | Select a file and display its source |
+| Shift+Tab / Enter (SLS explorer) | Focus and activate an action button |
+| Esc | Return to the previous screen |
 | h | History |
 | l | Logs |
 | e | Live Salt events |

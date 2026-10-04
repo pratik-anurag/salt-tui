@@ -10,7 +10,7 @@ from rich.syntax import Syntax
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Button, DataTable, Footer, Header, Input, RichLog, Static
+from textual.widgets import Button, DataTable, Footer, Header, Input, LoadingIndicator, RichLog, Static
 
 from salt_tui.models import CommandSpec
 from salt_tui.salt.commands import build_argv, display_argv, is_mutating, parse_line
@@ -87,6 +87,7 @@ class BaseScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static(self.shell.breadcrumb_text(), classes="breadcrumb")
         yield Static(self.title_text, classes="page-title")
         yield from self.content()
         yield Footer()
@@ -523,17 +524,23 @@ class SlsScreen(BaseScreen):
     title_text = "SLS explorer — source on disk; compiled views come from Salt"
 
     def content(self) -> ComposeResult:
+        yield Static("↑/↓ Select file  ·  Shift+Tab Choose action  ·  Enter Activate  ·  Esc Back", id="sls-hint")
         with Horizontal(classes="toolbar"):
             yield Input(value=self.shell.settings.default_saltenv, id="env", placeholder="saltenv")
             yield Input(value=(self.shell.current_sls or "").replace(".", "/"), placeholder="Filter files", id="filter")
             yield Button("Reload", id="reload")
-            yield Button("show_sls", id="high")
-            yield Button("show_low_sls", id="low")
+            yield Button("Rendered state", id="high")
+            yield Button("Execution steps", id="low")
             yield Button("Dependencies", id="deps")
+        yield Static("Rendered state: state.show_sls  ·  Execution steps: state.show_low_sls", id="sls-functions")
+        yield Static("", id="sls-status")
+        yield LoadingIndicator(id="sls-loading")
         with Horizontal(id="split"):
             yield DataTable(id="files", cursor_type="row")
-            with VerticalScroll(id="detail-scroll"):
-                yield Static("Select an SLS file", id="source")
+            with Vertical(id="sls-detail"):
+                yield Static("Source · Select a file", id="source-title")
+                with VerticalScroll(id="detail-scroll"):
+                    yield Static("Select an SLS file", id="source")
 
     async def on_mount(self) -> None:
         self.query_one("#files", DataTable).add_columns("Path", "SLS")
@@ -549,6 +556,9 @@ class SlsScreen(BaseScreen):
             table.add_row(rel, sls_name(rel) or "", key=key)
         if not self.paths:
             self.query_one("#source", Static).update(f"No files found for {env}. Configure file_roots in config.toml.")
+            self.query_one("#source-title", Static).update("Source · No files")
+            self.query_one("#sls-status", Static).update("No files in the selected environment")
+            self._set_actions_enabled(False)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         await self.refresh_data()
@@ -564,6 +574,9 @@ class SlsScreen(BaseScreen):
         if not entry: return
         rel, path = entry
         self.shell.current_sls = sls_name(rel)
+        self.query_one("#source-title", Static).update(f"Source · {rel}")
+        self.query_one("#sls-status", Static).update(f"Selected {rel}  ·  {len(self.paths)} files")
+        self._set_actions_enabled(self.shell.current_sls is not None)
         try:
             text = self.shell.client.redactor.text(path.read_text(errors="replace"))
             lang = SaltSlsLexer() if path.suffix == ".sls" else "jinja" if path.suffix in {".jinja", ".j2"} else "yaml" if path.suffix in {".yaml", ".yml"} else "json" if path.suffix == ".json" else "text"
@@ -576,21 +589,46 @@ class SlsScreen(BaseScreen):
         if not sls:
             self.notify("Select an SLS file", severity="warning"); return
         fn = "state.show_low_sls" if mode in {"low", "deps"} else "state.show_sls"
+        label = "Dependencies" if mode == "deps" else "Execution steps" if mode == "low" else "Rendered state"
         local = self.shell.capabilities is None or self.shell.capabilities.executables.get("salt-call", False)
         spec = CommandSpec(executable="salt-call" if local else "salt", function=fn,
                            target="local" if local else self.shell.settings.default_target,
                            arguments=[sls], saltenv=self.query_one("#env", Input).value)
-        self.query_one("#source", Static).update("Asking Salt to compile…")
-        run = await self.shell.execute(spec)
-        if mode == "deps":
-            graph = StateGraph.from_low(run.parsed)
-            self.shell.current_graph = graph
-            self.shell.switch_screen("graph")
-            self.shell.screen.call_after_refresh(self.shell.screen.refresh_graph)
-            return
-        else:
-            content = pretty(run.parsed)
-        self.query_one("#source", Static).update(content[:250000] + (f"\n\n{run.stderr}" if run.stderr else ""))
+        status = self.query_one("#sls-status", Static)
+        loading = self.query_one("#sls-loading", LoadingIndicator)
+        source = self.query_one("#source", Static)
+        title = self.query_one("#source-title", Static)
+        status.update(f"Compiling {sls} with {fn}…")
+        loading.display = True
+        self._set_actions_enabled(False)
+        try:
+            run = await self.shell.execute(spec)
+            if run.exit_code not in (None, 0) or run.status == "failed":
+                detail = run.stderr or run.stdout or pretty(run.parsed) or "Salt did not return an explanation."
+                raise RuntimeError(detail)
+            if mode == "deps":
+                graph = StateGraph.from_low(run.parsed)
+                self.shell.current_graph = graph
+                status.update(f"Dependencies ready for {sls}  ·  {fn}")
+                self.shell.show_screen("graph")
+                self.shell.screen.call_after_refresh(self.shell.screen.refresh_graph)
+                return
+            title.update(f"{label} · {sls}")
+            source.update(pretty(run.parsed)[:250000] + (f"\n\n{run.stderr}" if run.stderr else ""))
+            status.update(f"{label} ready for {sls}  ·  {fn}")
+        except Exception as exc:
+            title.update(f"Compilation failed · {sls}")
+            message = self.shell.client.redactor.text(str(exc))
+            source.update(message[:250000])
+            status.update(f"Could not compile {sls}  ·  {fn}")
+            self.notify(f"Compilation failed: {message[:180]}", severity="error", timeout=8)
+        finally:
+            loading.display = False
+            self._set_actions_enabled(self.shell.current_sls is not None)
+
+    def _set_actions_enabled(self, enabled: bool) -> None:
+        for button_id in ("high", "low", "deps"):
+            self.query_one(f"#{button_id}", Button).disabled = not enabled
 
     async def select_source(self, sls: str) -> None:
         self.query_one("#filter", Input).value = sls.replace(".", "/")
