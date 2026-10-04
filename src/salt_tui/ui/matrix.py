@@ -30,7 +30,7 @@ class MatrixScreen(Screen):
             yield Button("Minions ▶", id="minions_next")
         yield Static("", id="matrix_status")
         with Horizontal(id="split"):
-            yield DataTable(id="matrix_table")
+            yield DataTable(id="matrix_table", cursor_type="row")
             with VerticalScroll(id="detail-scroll"):
                 yield Static("Select a state row", id="matrix_detail")
         yield Footer()

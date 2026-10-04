@@ -35,7 +35,7 @@ class RunnerScreen(Screen):
             yield Button("Copy", id="runner_copy")
         yield Static("", id="runner_preview")
         with Horizontal(id="split"):
-            yield DataTable(id="runner_functions")
+            yield DataTable(id="runner_functions", cursor_type="row")
             yield RichLog(id="runner_output", wrap=True, max_lines=2000)
         yield Footer()
 
@@ -120,7 +120,7 @@ class OrchestrationScreen(Screen):
             yield Button("Test", id="orch_test")
             yield Button("Run", id="orch_run", variant="warning")
         yield Static("", id="orch_preview")
-        yield DataTable(id="orch_states")
+        yield DataTable(id="orch_states", cursor_type="row")
         yield RichLog(id="orch_output", wrap=True, max_lines=2000)
         yield Footer()
 

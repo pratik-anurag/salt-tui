@@ -101,7 +101,7 @@ class DashboardScreen(BaseScreen):
     def content(self) -> ComposeResult:
         yield Static("Checking Salt capabilities…", id="capabilities")
         yield Static("Loading recent runs…", id="summary")
-        yield DataTable(id="recent")
+        yield DataTable(id="recent", cursor_type="row")
         yield Static("d dashboard  m minions  j jobs  r states  v live  e events  s SLS  h history  l logs  c commands  ! failures  : palette", classes="hint")
 
 
@@ -295,7 +295,7 @@ class TableScreen(BaseScreen):
     def content(self) -> ComposeResult:
         yield Input(placeholder="Search (Enter)", id="search")
         with Horizontal(id="split"):
-            yield DataTable(id="table")
+            yield DataTable(id="table", cursor_type="row")
             with VerticalScroll(id="detail-scroll"):
                 yield Static("Select a row", id="detail")
 
@@ -531,13 +531,14 @@ class SlsScreen(BaseScreen):
             yield Button("show_low_sls", id="low")
             yield Button("Dependencies", id="deps")
         with Horizontal(id="split"):
-            yield DataTable(id="files")
+            yield DataTable(id="files", cursor_type="row")
             with VerticalScroll(id="detail-scroll"):
                 yield Static("Select an SLS file", id="source")
 
     async def on_mount(self) -> None:
         self.query_one("#files", DataTable).add_columns("Path", "SLS")
         await self.refresh_data()
+        self.query_one("#files", DataTable).focus()
 
     async def refresh_data(self) -> None:
         env = self.query_one("#env", Input).value
@@ -614,7 +615,7 @@ class JobsScreen(BaseScreen):
             yield Button("Find job", id="find")
             yield Button("Remote kill", id="kill", variant="error")
         with Horizontal(id="split"):
-            yield DataTable(id="job_table")
+            yield DataTable(id="job_table", cursor_type="row")
             with VerticalScroll(id="detail-scroll"):
                 yield Static("Select a job", id="job_detail")
 

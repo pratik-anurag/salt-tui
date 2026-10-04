@@ -9,6 +9,7 @@ from salt_tui.salt.events import normalize_event
 from salt_tui.storage.database import Database
 from salt_tui.sls.graph import StateGraph
 import json
+from textual.widgets import DataTable
 
 
 @pytest.mark.asyncio
@@ -20,6 +21,24 @@ async def test_screen_navigation(tmp_path: Path):
             app.action_show(name)
             await pilot.pause()
             assert app.screen is app.get_screen(name)
+
+
+@pytest.mark.asyncio
+async def test_sls_keyboard_selection_opens_source(tmp_path: Path):
+    root = tmp_path / "states"
+    root.mkdir()
+    (root / "example.sls").write_text("example:\n  test.nop: []\n")
+    (root / "second.sls").write_text("second:\n  test.nop: []\n")
+    app = SaltTUI(Settings(database=tmp_path / "history.db", file_roots={"base": [root]}), initial="sls")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#files", DataTable)
+        assert app.focused is table
+        assert table.cursor_type == "row"
+        assert app.current_sls == "example"
+        await pilot.press("down")
+        await pilot.pause()
+        assert app.current_sls == "second"
 
 
 @pytest.mark.asyncio

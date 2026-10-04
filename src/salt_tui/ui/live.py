@@ -36,7 +36,7 @@ class EventScreen(Screen):
             yield Button("Pause", id="pause")
             yield Button("Follow: on", id="follow")
         with Horizontal(id="split"):
-            yield DataTable(id="event_table")
+            yield DataTable(id="event_table", cursor_type="row")
             with VerticalScroll(id="detail-scroll"):
                 yield Static("Select an event", id="event_detail")
         yield Footer()
@@ -133,7 +133,7 @@ class LiveRunScreen(Screen):
         yield Static("Live state run", classes="page-title")
         yield Static("", id="live_header")
         with Horizontal(id="split"):
-            yield DataTable(id="minion_progress")
+            yield DataTable(id="minion_progress", cursor_type="row")
             with VerticalScroll(id="detail-scroll"):
                 yield Static("Select a minion", id="live_detail")
         yield Footer()

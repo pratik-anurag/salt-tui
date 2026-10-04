@@ -7,6 +7,7 @@
 | j | Jobs |
 | r | State results |
 | s | SLS explorer |
+| Up / Down (SLS explorer) | Select a file and display its source |
 | h | History |
 | l | Logs |
 | e | Live Salt events |

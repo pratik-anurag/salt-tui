@@ -41,7 +41,7 @@ class GraphScreen(Screen):
             yield Button("Path", id="path")
         yield Static("", id="graph_status")
         with Horizontal(id="graph_split"):
-            yield DataTable(id="graph_nodes")
+            yield DataTable(id="graph_nodes", cursor_type="row")
             with Horizontal(id="graph_panes"):
                 with VerticalScroll(id="graph_source_scroll"):
                     yield Static("Select a state", id="graph_source")

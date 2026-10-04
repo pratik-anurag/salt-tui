@@ -27,7 +27,7 @@ class TargetsScreen(Screen):
             yield Button("Rename", id="target_rename")
             yield Button("Delete", id="target_delete", variant="error")
             yield Button("Use", id="target_use", variant="primary")
-        yield DataTable(id="target_table")
+        yield DataTable(id="target_table", cursor_type="row")
         yield Static("Select a target. Save updates the selected name; Rename uses the Name input as the new name.", id="target_hint")
         yield Footer()
 
