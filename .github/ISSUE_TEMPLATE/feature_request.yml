@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest a Salt TUI improvement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Search existing issues and describe the user problem before proposing a solution.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow
+      description: What are you trying to do, and what makes it difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the screen, command, or interaction you would like.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or constraints
+      description: Include relevant Salt versions, target types, or safety concerns.
+    validations:
+      required: false
