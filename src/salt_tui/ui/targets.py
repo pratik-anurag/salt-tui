@@ -36,6 +36,17 @@ class TargetsScreen(Screen):
         self.selected_name: str | None = None
         await self.refresh_data()
 
+    def apply_draft(self) -> None:
+        draft = self.shell.target_draft
+        if not draft:
+            return
+        self.selected_name = None
+        self.query_one("#target_name", Input).value = ""
+        self.query_one("#target_expression", Input).value = draft["expression"]
+        self.query_one("#target_type", Input).value = draft["target_type"]
+        self.query_one("#target_hint", Static).update("Selection is temporary. Enter a name and choose Save to keep it.")
+        self.shell.target_draft = None
+
     async def refresh_data(self) -> None:
         rows = await self.shell.db.list_targets()
         self.rows = {row["name"]: row for row in rows}

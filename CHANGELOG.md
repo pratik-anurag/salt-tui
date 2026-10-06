@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add read-only minion detail for live/cached grains, schedules, beacons, responding nodegroups, and opt-in session-only redacted pillars.
+- Add temporary minion selection and list-target composition from minions and nodegroups.
 - Browse local state files as a tree or query Salt for states available to a target and environment.
 - Test a selected SLS, review planned changes, and apply it with an explicit target and command confirmation.
 - Track synchronous and live runs together, including missing returns, failed-state source links, and run logs.

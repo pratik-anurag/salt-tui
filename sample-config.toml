@@ -19,6 +19,12 @@ salt_key = "salt-key"
 salt_cp = "salt-cp"
 backend = "cli" # cli or python (requires Salt in this Python environment)
 enable_plugins = true
+detail_cache_ttl_seconds = 900
+detail_cache_minions_per_kind = 1000
+minion_preview_grains = ["id", "os", "osrelease", "kernelrelease", "fqdn", "ipv4"]
+# Pillar values can contain credentials. They are disabled by default and are never cached.
+enable_pillar_details = false
+pillar_public_paths = []
 
 [file_roots]
 base = ["/srv/salt"]

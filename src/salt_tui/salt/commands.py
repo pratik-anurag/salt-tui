@@ -79,5 +79,5 @@ def parse_line(line: str, settings: Settings) -> CommandSpec:
 def is_mutating(spec: CommandSpec) -> bool:
     if spec.executable in {"salt-cp", "salt-key"}:
         return True
-    readonly_prefixes = ("test.", "grains.", "pillar.", "config.", "sys.", "status.", "jobs.", "state.show_", "state.sls_exists", "saltutil.find_job", "saltutil.running")
+    readonly_prefixes = ("test.", "grains.", "pillar.", "schedule.list", "beacons.list", "config.", "sys.", "status.", "jobs.", "state.show_", "state.sls_exists", "saltutil.find_job", "saltutil.running")
     return not spec.function.startswith(readonly_prefixes)

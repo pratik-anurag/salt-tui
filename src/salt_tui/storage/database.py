@@ -555,6 +555,34 @@ class Database:
           FROM minion_results m JOIN runs r ON r.id=m.run_id WHERE m.minion_id LIKE ? GROUP BY m.minion_id
           ORDER BY m.minion_id LIMIT ?""", (f"%{search}%", limit))
 
+    async def detail_snapshot(self, minion_id: str, detail_kind: str) -> dict | None:
+        rows = await self.query("SELECT * FROM minion_detail_cache WHERE minion_id=? AND detail_kind=?",
+                                (minion_id, detail_kind))
+        if not rows:
+            return None
+        row = rows[0]
+        try:
+            row["payload"] = json.loads(row.pop("payload_json"))
+        except (KeyError, TypeError, json.JSONDecodeError):
+            row["payload"] = None
+        return row
+
+    async def save_detail_snapshot(self, minion_id: str, detail_kind: str, payload: Any,
+                                   status: str = "success", limit: int = 1000) -> None:
+        safe = self.redactor.value(payload)
+        await asyncio.to_thread(self._save_detail_snapshot, minion_id, detail_kind, safe, status, limit)
+
+    def _save_detail_snapshot(self, minion_id: str, detail_kind: str, payload: Any,
+                              status: str, limit: int) -> None:
+        with self._connect() as con:
+            con.execute("""INSERT INTO minion_detail_cache(minion_id,detail_kind,captured_at,status,payload_json)
+              VALUES (?,?,?,?,?) ON CONFLICT(minion_id,detail_kind) DO UPDATE SET
+              captured_at=excluded.captured_at,status=excluded.status,payload_json=excluded.payload_json""",
+                        (minion_id, detail_kind, now(), status, encode(payload)))
+            con.execute("""DELETE FROM minion_detail_cache WHERE detail_kind=? AND minion_id IN (
+              SELECT minion_id FROM minion_detail_cache WHERE detail_kind=?
+              ORDER BY captured_at DESC LIMIT -1 OFFSET ?)""", (detail_kind, detail_kind, max(1, limit)))
+
     async def prune(self, history_limit: int, log_limit: int) -> None:
         await asyncio.to_thread(self._prune, history_limit, log_limit)
 

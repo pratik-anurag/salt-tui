@@ -73,7 +73,7 @@ class PaletteScreen(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="palette_box"):
-            yield Input(placeholder="dashboard, minions, jobs, states, sls, history, logs, failures, settings, command", id="palette_input")
+            yield Input(placeholder="dashboard, minions, nodegroups, jobs, states, sls, history, logs, failures, settings, command", id="palette_input")
             yield Static("Type a screen name or a Salt command, then Enter. Esc closes.")
 
     def on_mount(self) -> None:
@@ -510,8 +510,17 @@ class LogsScreen(TableScreen):
 
 
 class MinionsScreen(TableScreen):
-    title_text = "Minions — local history; Ctrl+R probes live reachability"
+    title_text = "Minions — Enter details · Space selects · Ctrl+R probes live reachability"
     columns = ("Minion ID", "Last response", "Last result")
+    BINDINGS = [("space", "toggle_selection", "Toggle selection")]
+
+    def content(self) -> ComposeResult:
+        with Horizontal(classes="toolbar"):
+            yield Button("Use selected", id="minions_use", variant="primary")
+            yield Button("Save selection", id="minions_save")
+            yield Button("Select visible", id="minions_select_visible")
+            yield Button("Clear selection", id="minions_clear")
+        yield from super().content()
 
     async def refresh_data(self) -> None:
         self.rows = {r["minion_id"]: r for r in await self.shell.db.minions(self.query_one("#search", Input).value)}
@@ -519,9 +528,51 @@ class MinionsScreen(TableScreen):
         for key, r in self.rows.items():
             table.add_row(key, (r["last_seen"] or "")[:19], r["last_status"] or "", key=key)
 
+    def _selected_id(self) -> str | None:
+        table = self.query_one("#table", DataTable)
+        if not table.row_count:
+            return None
+        try:
+            return str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
+        except Exception:
+            return None
+
+    def action_toggle_selection(self) -> None:
+        minion_id = self._selected_id()
+        if not minion_id:
+            return
+        if minion_id in self.shell.selected_minions:
+            self.shell.selected_minions.remove(minion_id)
+            self.notify(f"Removed {minion_id}; {len(self.shell.selected_minions)} selected")
+        else:
+            self.shell.selected_minions.add(minion_id)
+            self.notify(f"Selected {minion_id}; {len(self.shell.selected_minions)} selected")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "minions_use":
+            self.shell.use_selected_minions()
+        elif event.button.id == "minions_save":
+            self.shell.save_selected_minions()
+        elif event.button.id == "minions_select_visible":
+            self.shell.selected_minions.update(self.rows)
+            self.notify(f"Selected {len(self.shell.selected_minions)} minions")
+        elif event.button.id == "minions_clear":
+            self.shell.selected_minions.clear()
+            self.notify("Temporary selection cleared")
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        minion_id = str(event.row_key.value)
+        row = self.rows.get(minion_id, {})
+        selected = sorted(self.shell.selected_minions)
+        sample = ", ".join(selected[:10]) + (f" +{len(selected) - 10} more" if len(selected) > 10 else "")
+        self.show_detail(f"Minion: {minion_id}\nLast response: {row.get('last_seen') or 'unknown'}\n"
+                         f"Last result: {row.get('last_status') or 'unknown'}\n\n"
+                         f"Temporary selection ({len(selected)}): {sample or 'none'}\n\n"
+                         "Enter: inspect details · Space: toggle selection")
+
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         key = str(event.row_key.value)
-        self.shell.open_command(f"salt {key!r} grains.items")
+        self.shell.open_minion_detail(key)
 
 
 class SlsScreen(BaseScreen):

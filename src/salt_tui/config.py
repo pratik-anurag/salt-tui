@@ -37,6 +37,13 @@ class Settings:
     targets: dict[str, dict[str, str]] = field(default_factory=dict)
     backend: str = "cli"
     enable_plugins: bool = True
+    detail_cache_ttl_seconds: int = 900
+    detail_cache_minions_per_kind: int = 1000
+    minion_preview_grains: list[str] = field(default_factory=lambda: [
+        "id", "os", "osrelease", "kernelrelease", "fqdn", "ipv4",
+    ])
+    enable_pillar_details: bool = False
+    pillar_public_paths: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Settings":

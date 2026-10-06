@@ -24,7 +24,9 @@ from salt_tui.ui.analytics import FailureIntelligenceScreen, PerformanceScreen
 from salt_tui.ui.runner import RunnerScreen, OrchestrationScreen
 from salt_tui.ui.targets import TargetsScreen
 from salt_tui.ui.matrix import MatrixScreen
+from salt_tui.ui.fleet import MinionDetailScreen, NodegroupsScreen
 from salt_tui.salt.commands import build_argv, display_argv, parse_line
+from salt_tui.salt.nodegroups import names as nodegroup_names
 from salt_tui.plugins import PluginRegistry, load_plugins
 
 LOG = logging.getLogger("salt_tui")
@@ -84,6 +86,7 @@ class SaltTUI(App):
         ("i", "show('intelligence')", "Failure patterns"), ("p", "show('performance')", "Slow states"),
         ("ctrl+u", "show('runner')", "Runner"), ("ctrl+o", "show('orchestration')", "Orchestration"),
         ("ctrl+t", "show('targets')", "Saved targets"),
+        ("ctrl+n", "show('nodegroups')", "Nodegroups"),
         ("ctrl+m", "show('matrix')", "State matrix"),
         ("exclamation_mark", "show('failures')", "Failures"),
         ("ctrl+r", "refresh", "Refresh"), ("question_mark", "help", "Help"),
@@ -113,6 +116,9 @@ class SaltTUI(App):
         self.review_spec: CommandSpec | None = None
         self.last_state_test: tuple[tuple, int] | None = None
         self.selected_target: dict | None = None
+        self.selected_minions: set[str] = set()
+        self.current_minion_id: str | None = None
+        self.target_draft: dict[str, str] | None = None
         self.initial = initial
         self._current_screen_name = initial
         self._screen_history: list[str] = []
@@ -143,6 +149,7 @@ class SaltTUI(App):
             "runner": RunnerScreen(), "orchestration": OrchestrationScreen(),
             "targets": TargetsScreen(),
             "matrix": MatrixScreen(),
+            "minion_detail": MinionDetailScreen(), "nodegroups": NodegroupsScreen(),
         }.items():
             self.install_screen(screen, name)
         for name, factory in self.plugins.screens.items():
@@ -221,6 +228,46 @@ class SaltTUI(App):
             return None, f"Target preview unavailable: {run.stderr or 'no structured response'}"
         minions = sorted(str(minion) for minion in run.parsed)
         return minions, "Responding minions only; unreachable matches may be absent."
+
+    async def inspect_minion_detail(self, minion_id: str, kind: str) -> Any:
+        """Run an unpersisted, read-only inspection command for one minion."""
+        function = {"grains": "grains.items", "pillars": "pillar.items",
+                    "schedules": "schedule.list", "beacons": "beacons.list"}.get(kind)
+        if not function:
+            raise ValueError("Unsupported minion detail")
+        if self._busy:
+            raise RuntimeError("A Salt command is already running; use cached details or retry when it finishes")
+        self._busy = True
+        try:
+            run = await self.client.run(CommandSpec(function=function, target=minion_id, target_type="glob"))
+        finally:
+            self._busy = False
+        if run.exit_code != 0 or run.status == "failed" or not isinstance(run.parsed, dict):
+            raise RuntimeError(run.stderr or "Salt did not return structured detail data")
+        if minion_id not in run.parsed:
+            raise RuntimeError("The selected minion did not return detail data")
+        return self.client.redactor.value(run.parsed[minion_id])
+
+    def configured_nodegroups(self) -> list[str]:
+        return nodegroup_names(self.settings.master_config)
+
+    async def resolve_nodegroup(self, name: str) -> list[str]:
+        if self._busy:
+            raise RuntimeError("A Salt command is already running; retry when it finishes")
+        self._busy = True
+        try:
+            run = await self.client.run(CommandSpec(function="test.ping", target=name, target_type="nodegroup", timeout=10))
+        finally:
+            self._busy = False
+        if run.exit_code != 0 or not isinstance(run.parsed, dict):
+            raise RuntimeError(run.stderr or "Salt could not resolve this nodegroup")
+        members = sorted(str(minion) for minion, result in run.parsed.items() if result is not False)
+        for minion in members:
+            cached = await self.db.detail_snapshot(minion, "nodegroups")
+            groups = cached["payload"] if cached and isinstance(cached["payload"], list) else []
+            await self.db.save_detail_snapshot(minion, "nodegroups", sorted(set([*groups, name])),
+                                               limit=self.settings.detail_cache_minions_per_kind)
+        return members
 
     @staticmethod
     def _state_workflow_key(spec: CommandSpec) -> tuple:
@@ -329,6 +376,29 @@ class SaltTUI(App):
         spec.target_type = target["target_type"]
         self.open_command(display_argv(build_argv(spec, self.settings)))
 
+    def open_minion_detail(self, minion_id: str) -> None:
+        self.current_minion_id = minion_id
+        detail = self.get_screen("minion_detail")
+        detail.kind = "grains"
+        detail.pillar_value = None
+        detail.show_full_pillars = False
+        self.show_screen("minion_detail")
+        self.screen.call_after_refresh(self.screen.load, False)
+
+    def use_selected_minions(self) -> None:
+        if not self.selected_minions:
+            self.notify("Select at least one minion first", severity="warning")
+            return
+        self.open_command_with_target({"expression": ",".join(sorted(self.selected_minions)), "target_type": "list"})
+
+    def save_selected_minions(self) -> None:
+        if not self.selected_minions:
+            self.notify("Select at least one minion first", severity="warning")
+            return
+        self.target_draft = {"expression": ",".join(sorted(self.selected_minions)), "target_type": "list"}
+        self.show_screen("targets")
+        self.screen.call_after_refresh(self.screen.apply_draft)
+
     def action_show(self, name: str) -> None:
         self.show_screen(name)
         if hasattr(self.screen, "refresh_data"):
@@ -376,7 +446,7 @@ class SaltTUI(App):
             asyncio.create_task(self.screen.refresh_data())
 
     def action_help(self) -> None:
-        self.notify("d Dashboard | m Minions | j Jobs | r States | Ctrl+M Matrix | v Run tracker | e Events | g Graph | s SLS | h History | l Logs | i Failures | p Slow | Ctrl+U Runner | Ctrl+O Orchestration | Ctrl+T Targets | c Command | : Palette | Esc Back | q Quit", timeout=10)
+        self.notify("d Dashboard | m Minions | Ctrl+N Nodegroups | j Jobs | r States | Ctrl+M Matrix | v Run tracker | e Events | g Graph | s SLS | h History | l Logs | i Failures | p Slow | Ctrl+U Runner | Ctrl+O Orchestration | Ctrl+T Targets | c Command | : Palette | Esc Back | q Quit", timeout=10)
 
     def action_palette(self) -> None:
         def selected(value: str | None) -> None:

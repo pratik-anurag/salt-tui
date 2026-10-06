@@ -4,6 +4,7 @@
 | --- | --- |
 | d | Dashboard |
 | m | Minions |
+| Ctrl+N | Nodegroups |
 | j | Jobs |
 | r | State results |
 | s | SLS explorer |
@@ -26,6 +27,8 @@
 | f / Shift+F | Next / previous failure within state results |
 | x (History) | Select baseline run; press again on another run to compare |
 | Space (Events) | Pause or resume event display |
+| Space (Minions) | Toggle the highlighted minion in the temporary selection |
+| Space (Nodegroups) | Resolve a nodegroup and add its responding members to the temporary selection |
 | End (Events) | Toggle follow mode |
 | u / n (Graph) | Follow an upstream / downstream edge |
 | o (Graph or States) | Open a state’s SLS source |
