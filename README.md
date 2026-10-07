@@ -1,6 +1,9 @@
 # Salt TUI
 
 [![CI](https://github.com/pratik-anurag/salt-tui/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pratik-anurag/salt-tui/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/salt-tui)](https://pypi.org/project/salt-tui/)
+[![Python](https://img.shields.io/pypi/pyversions/salt-tui)](https://pypi.org/project/salt-tui/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 PyPI - https://pypi.org/project/salt-tui/
 
