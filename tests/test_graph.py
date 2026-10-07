@@ -1,9 +1,11 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from salt_tui.config import Settings
 from salt_tui.sls.graph import StateGraph
-from salt_tui.sls.source_links import extend_hints, include_hints, locate_source
+from salt_tui.sls.source_links import extend_hints, include_hints, local_sls_paths, locate_source
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -44,3 +46,28 @@ def test_source_location_and_literal_includes(tmp_path):
     assert include_hints(path) == ["nginx.config"]
     assert extend_hints(path) == ["nginx-service"]
     assert locate_source(settings, "base", "nginx", "generated-id") is None
+
+
+def test_source_lookup_rejects_paths_outside_configured_roots(tmp_path):
+    root = tmp_path / "salt"
+    root.mkdir()
+    outside = tmp_path / "outside.sls"
+    outside.write_text("outside-id:\n  test.nop: []\n")
+    settings = Settings(file_roots={"base": [root]})
+
+    assert local_sls_paths(settings, "base", str(outside.with_suffix(""))) == ()
+    assert locate_source(settings, "base", str(outside.with_suffix("")), "outside-id") is None
+
+
+def test_source_lookup_rejects_symlink_outside_configured_roots(tmp_path):
+    root = tmp_path / "salt"
+    root.mkdir()
+    outside = tmp_path / "outside.sls"
+    outside.write_text("outside-id:\n  test.nop: []\n")
+    try:
+        (root / "escaped.sls").symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this platform")
+    settings = Settings(file_roots={"base": [root]})
+
+    assert local_sls_paths(settings, "base", "escaped") == ()

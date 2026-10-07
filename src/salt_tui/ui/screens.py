@@ -16,6 +16,7 @@ from salt_tui.models import CommandSpec
 from salt_tui.salt.commands import build_argv, display_argv, is_mutating, parse_line
 from salt_tui.salt.jobs import parse_jobs
 from salt_tui.sls.explorer import available_states, files, local_tree_rows, sls_name
+from salt_tui.sls.source_links import local_sls_paths
 from salt_tui.sls.dependencies import tree_lines
 from salt_tui.sls.syntax import SaltSlsLexer
 from salt_tui.sls.graph import StateGraph
@@ -751,12 +752,7 @@ class SlsScreen(BaseScreen):
             self.query_one("#source", Static).update(str(exc))
 
     def _local_path(self, env: str, sls: str) -> Path | None:
-        relative = Path(*sls.split("."))
-        for root in self.shell.settings.file_roots.get(env, []):
-            for candidate in (root / relative.with_suffix(".sls"), root / relative / "init.sls"):
-                if candidate.is_file():
-                    return candidate
-        return None
+        return next(iter(local_sls_paths(self.shell.settings, env, sls)), None)
 
     def _selected_spec(self, function: str, arguments: list[str], env: str, target: str, *, test: bool = False) -> CommandSpec:
         if not target:

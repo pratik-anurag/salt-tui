@@ -1,29 +1,50 @@
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 
 from salt_tui.config import Settings
 
 
+def local_sls_paths(settings: Settings, env: str, sls: str) -> tuple[Path, ...]:
+    """Return existing SLS files only when they resolve inside configured roots."""
+    parts = sls.split(".")
+    if (not sls or any(not part or part in {".", ".."} or "/" in part or "\\" in part
+                       or "\x00" in part or PureWindowsPath(part).drive for part in parts)):
+        return ()
+    relative = Path(*parts)
+    candidates = (relative.with_suffix(".sls"), relative / "init.sls")
+    paths: list[Path] = []
+    for root in settings.file_roots.get(env, []):
+        try:
+            resolved_root = root.resolve()
+        except OSError:
+            continue
+        for candidate in candidates:
+            try:
+                path = (root / candidate).resolve()
+                path.relative_to(resolved_root)
+            except (OSError, ValueError):
+                # Salt responses are untrusted here; never follow an absolute,
+                # traversal, or symlinked path outside the configured root.
+                continue
+            if path.is_file():
+                paths.append(path)
+    return tuple(paths)
+
+
 def locate_source(settings: Settings, env: str, sls: str, state_id: str) -> tuple[Path, int] | None:
     """Return a location only when one literal top-level declaration is found."""
-    relative = Path(*sls.split("."))
-    candidates = [relative.with_suffix(".sls"), relative / "init.sls"]
     escaped = re.escape(state_id)
     pattern = re.compile(rf"^(?:{escaped}|['\"]{escaped}['\"]):\s*(?:#.*)?$")
     matches: list[tuple[Path, int]] = []
-    for root in settings.file_roots.get(env, []):
-        for candidate in candidates:
-            path = root / candidate
-            if not path.is_file():
-                continue
-            try:
-                for number, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
-                    if pattern.match(line):
-                        matches.append((path, number))
-            except OSError:
-                continue
+    for path in local_sls_paths(settings, env, sls):
+        try:
+            for number, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+                if pattern.match(line):
+                    matches.append((path, number))
+        except OSError:
+            continue
     return matches[0] if len(matches) == 1 else None
 
 
