@@ -116,7 +116,12 @@ async def test_tracker_exposes_failed_state_source_and_logs(tmp_path: Path):
         assert "Service failed to start" in str(app.screen.query_one("#live_detail", Static).render())
         assert not app.screen.query_one("#tracker_source", Button).disabled
         await pilot.click("#tracker_logs")
-        await pilot.pause()
+        for _ in range(20):
+            await pilot.pause(0.05)
+            if "service failed" in str(app.screen.query_one("#live_detail", Static).render()):
+                break
+        assert "service failed" in str(app.screen.query_one("#live_detail", Static).render())
+        await pilot.pause(1.05)
         assert "service failed" in str(app.screen.query_one("#live_detail", Static).render())
         await pilot.click("#tracker_next_failure")
         await pilot.pause()

@@ -160,6 +160,7 @@ class LiveRunScreen(Screen):
         self._failure_index = 0
         self._base_detail = ""
         self._shown_minion: str | None = None
+        self._showing_logs = False
         self.query_one("#tracker_source", Button).disabled = True
         self.query_one("#tracker_next_failure", Button).disabled = True
         await self.refresh_data()
@@ -232,10 +233,11 @@ class LiveRunScreen(Screen):
                 selected = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
             except Exception:
                 selected = None
-            if selected in self._rows:
+            if selected in self._rows and not self._showing_logs:
                 await self._show_minion(selected)
 
     async def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        self._showing_logs = False
         await self._show_minion(str(event.row_key.value))
 
     async def _show_minion(self, minion: str) -> None:
@@ -290,6 +292,7 @@ class LiveRunScreen(Screen):
         if len(self._failure_rows) < 2:
             self.notify("No other failed state for this minion")
             return
+        self._showing_logs = False
         self._failure_index = (self._failure_index + 1) % len(self._failure_rows)
         self._show_failure_selection()
 
@@ -302,8 +305,12 @@ class LiveRunScreen(Screen):
         elif event.button.id == "tracker_source":
             self.action_open_failed_source()
         elif event.button.id == "tracker_refresh":
+            self._showing_logs = False
             await self.refresh_data()
         elif event.button.id == "tracker_logs" and run_id:
+            # Keep asynchronously fetched logs visible until the operator returns
+            # to the minion view; periodic tracker refreshes must not overwrite them.
+            self._showing_logs = True
             rows = await self.shell.db.logs(run_id=run_id)
             self.query_one("#live_detail", Static).update(
                 "Run logs:\n\n" + "\n".join(f"[{row['level']}] {row['message']}" for row in rows)
