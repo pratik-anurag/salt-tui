@@ -1,5 +1,7 @@
 # Salt TUI
 
+[![CI](https://github.com/pratik-anurag/salt-tui/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pratik-anurag/salt-tui/actions/workflows/ci.yml)
+
 PyPI - https://pypi.org/project/salt-tui/
 
 A Textual frontend for Salt CLI operations, structured state returns, local history, and SLS exploration. Salt remains the source of truth for state rendering and execution.
