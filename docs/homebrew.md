@@ -1,6 +1,6 @@
 # Homebrew formula
 
-Salt TUI is distributed through this repository as a Homebrew tap formula. On macOS, install it with:
+Salt TUI is distributed through the [Homebrew tap](https://github.com/pratik-anurag/homebrew-salt-tui). On macOS, install it with:
 
 ```sh
 brew tap pratik-anurag/salt-tui
@@ -11,7 +11,7 @@ The formula builds an isolated Python virtual environment from the PyPI source r
 
 ## Maintainer release step
 
-After a new version has been published to PyPI, update `Formula/salt-tui.rb` before advertising it:
+After a new version has been published to PyPI, update the formula in the tap repository before advertising it:
 
 1. Replace the source archive URL and SHA-256 with the new PyPI source distribution.
 2. Refresh the resource blocks using `brew update-python-resources` from a checkout installed as a Homebrew tap.
