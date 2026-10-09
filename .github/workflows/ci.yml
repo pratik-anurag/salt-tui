@@ -43,5 +43,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes build-essential debhelper dh-sequence-python3 pybuild-plugin-pyproject python3-all python3-hatchling
-          dpkg-buildpackage --no-sign --build=binary
-          dpkg-deb --info ../salt-tui_*.deb
+          # Use Ubuntu's Python so pybuild can import APT-installed build dependencies.
+          PATH=/usr/bin:/bin dpkg-buildpackage --no-sign --build=binary
+          PATH=/usr/bin:/bin dpkg-deb --info ../salt-tui_*.deb
