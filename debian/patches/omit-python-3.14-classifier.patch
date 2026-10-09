@@ -1,0 +1,17 @@
+Description: omit a classifier unknown to Noble's Hatchling
+ Ubuntu Noble ships Hatchling 1.21, which predates the Python 3.14 Trove
+ classifier. Keep the upstream metadata intact and remove it only while
+ building the Noble Debian package.
+Forwarded: not-needed
+Last-Update: 2026-10-10
+
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -17,7 +17,6 @@
+     "Programming Language :: Python :: 3.11",
+     "Programming Language :: Python :: 3.12",
+     "Programming Language :: Python :: 3.13",
+-    "Programming Language :: Python :: 3.14",
+     "Topic :: System :: Systems Administration",
+ ]
+ dependencies = ["textual>=1.0,<8", "rich>=13.7", "PyYAML>=6", "Pygments>=2.16"]

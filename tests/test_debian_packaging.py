@@ -11,9 +11,11 @@ def test_debian_package_metadata_matches_project_version():
     version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
     changelog = (ROOT / "debian/changelog").read_text()
     control = (ROOT / "debian/control").read_text()
+    patches = (ROOT / "debian/patches/series").read_text()
     rules = ROOT / "debian/rules"
 
     assert re.match(rf"salt-tui \({re.escape(version)}-1\) noble; urgency=medium", changelog)
     assert "Package: salt-tui" in control
     assert "pybuild-plugin-pyproject" in control
+    assert "omit-python-3.14-classifier.patch" in patches
     assert os.access(rules, os.X_OK)
