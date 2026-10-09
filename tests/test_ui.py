@@ -25,6 +25,31 @@ async def test_screen_navigation(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_minion_selection_summary_updates_without_moving_cursor(tmp_path: Path):
+    app = SaltTUI(Settings(database=tmp_path / "history.db"), initial="minions")
+    run = RunResult("salt '*' test.version", ["salt", "*", "test.version"], "*", "glob", "test.version",
+                    parsed={"web-01": "3007.1", "web-02": "3007.1"}, status="success", exit_code=0)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await app.db.save_run(run)
+        await app.screen.refresh_data()
+        table = app.screen.query_one("#table", DataTable)
+        table.move_cursor(row=0)
+        await pilot.pause()
+
+        await pilot.press("space")
+        await pilot.pause()
+        assert "Temporary selection (1): web-01" in str(app.screen.query_one("#detail", Static).render())
+
+        await pilot.click("#minions_select_visible")
+        await pilot.pause()
+        assert "Temporary selection (2): web-01, web-02" in str(app.screen.query_one("#detail", Static).render())
+
+        await pilot.click("#minions_clear")
+        await pilot.pause()
+        assert "Temporary selection (0): none" in str(app.screen.query_one("#detail", Static).render())
+
+
+@pytest.mark.asyncio
 async def test_sls_keyboard_selection_opens_source(tmp_path: Path):
     root = tmp_path / "states"
     root.mkdir()

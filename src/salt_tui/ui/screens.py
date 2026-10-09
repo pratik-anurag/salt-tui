@@ -548,6 +548,7 @@ class MinionsScreen(TableScreen):
         else:
             self.shell.selected_minions.add(minion_id)
             self.notify(f"Selected {minion_id}; {len(self.shell.selected_minions)} selected")
+        self._refresh_selection_detail()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "minions_use":
@@ -557,12 +558,21 @@ class MinionsScreen(TableScreen):
         elif event.button.id == "minions_select_visible":
             self.shell.selected_minions.update(self.rows)
             self.notify(f"Selected {len(self.shell.selected_minions)} minions")
+            self._refresh_selection_detail()
         elif event.button.id == "minions_clear":
             self.shell.selected_minions.clear()
             self.notify("Temporary selection cleared")
+            self._refresh_selection_detail()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        minion_id = str(event.row_key.value)
+        self._show_minion_detail(str(event.row_key.value))
+
+    def _refresh_selection_detail(self) -> None:
+        minion_id = self._selected_id()
+        if minion_id:
+            self._show_minion_detail(minion_id)
+
+    def _show_minion_detail(self, minion_id: str) -> None:
         row = self.rows.get(minion_id, {})
         selected = sorted(self.shell.selected_minions)
         sample = ", ".join(selected[:10]) + (f" +{len(selected) - 10} more" if len(selected) > 10 else "")
