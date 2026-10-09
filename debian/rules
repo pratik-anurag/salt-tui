@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+
+export PYBUILD_NAME=salt-tui
+
+%:
+	dh $@ --buildsystem=pybuild
+
+override_dh_auto_test:
+	# The CI workflow runs the complete test suite before building this package.
+	:

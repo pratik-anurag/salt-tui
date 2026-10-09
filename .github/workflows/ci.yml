@@ -39,3 +39,9 @@ jobs:
           python -m pipx install dist/*.whl
           "$PIPX_BIN_DIR/salt-tui" --version
           python -m pipx uninstall salt-tui
+      - name: Build Debian package
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes debhelper dh-sequence-python3 pybuild-plugin-pyproject python3-all python3-hatchling
+          dpkg-buildpackage --no-sign --build=binary
+          dpkg-deb --info ../salt-tui_*.deb

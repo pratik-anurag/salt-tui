@@ -33,7 +33,7 @@ salt-tui
 python -m salt_tui --version
 ```
 
-To test a local release artifact, run `python -m build` and then `pipx install ./dist/salt_tui-X.Y.Z-py3-none-any.whl`. Replace `X.Y.Z` with the version you built. Salt CLI executables are discovered at runtime on `PATH`; Salt is not a Python dependency of this package.
+To test a local release artifact, run `python -m build` and then `pipx install ./dist/salt_tui-X.Y.Z-py3-none-any.whl`. Replace `X.Y.Z` with the version you built. Salt CLI executables are discovered at runtime on `PATH`; Salt is not a Python dependency of this package. Ubuntu package maintainers can publish the included Debian packaging through a Launchpad PPA; see the [APT package guide](docs/apt.md). The PPA must be created and populated before `apt install salt-tui` is available.
 
 Without Salt binaries, the UI opens with capability information and retains local history and SLS browsing. With `salt`, master commands are available; `salt-call` enables local minion commands. The app also detects `salt-run` and `salt-key` for their supported views. Live Salt behavior depends on the installed Salt CLI and access to a Salt environment. This package has been exercised on macOS; Linux is used in CI.
 

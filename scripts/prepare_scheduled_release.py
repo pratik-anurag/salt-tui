@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
+from email.utils import format_datetime
 import os
 from pathlib import Path
 import re
@@ -11,6 +12,23 @@ import tomllib
 
 
 FIRST_RELEASE_DATE = date(2026, 10, 19)
+
+
+def prepare_debian_changelog(current: str, version: str, today: date) -> None:
+    """Prepend a source-package entry that matches the upstream release."""
+    path = Path("debian/changelog")
+    changelog = path.read_text()
+    match = re.match(r"^salt-tui \(([^)]+)\) noble; urgency=medium\n", changelog)
+    expected = f"{current}-1"
+    if not match or match.group(1) != expected:
+        raise SystemExit(f"Expected Debian version {expected}; found {match.group(1) if match else 'none'}")
+    timestamp = format_datetime(datetime.combine(today, time.min, tzinfo=timezone.utc))
+    entry = (
+        f"salt-tui ({version}-1) noble; urgency=medium\n\n"
+        f"  * Release {version}.\n\n"
+        f" -- Pratik Anurag <panurag247365@gmail.com>  {timestamp}\n\n"
+    )
+    path.write_text(entry + changelog)
 
 
 def due(today: date) -> bool:
@@ -56,6 +74,7 @@ def prepare(today: date) -> str | None:
     changelog_file.write_text(
         changelog.replace(heading, f"{heading}\n## {version} — {today.isoformat()}\n", 1)
     )
+    prepare_debian_changelog(current, version, today)
     print(f"Prepared v{version} from {last_tag}")
     return f"v{version}"
 
