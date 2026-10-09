@@ -21,7 +21,7 @@ def main() -> None:
     diagnostics = sub.add_parser("diagnostics", help="Write a redacted support bundle")
     diagnostics.add_argument("--output", type=Path)
     diagnostics.add_argument("--run", type=int, help="Explicitly include one run")
-    for name in ("history", "failures", "intelligence", "performance", "minions", "jobs", "logs", "events", "live", "graph", "runner", "orchestration", "targets", "matrix", "functions", "keys", "file-copy"):
+    for name in ("history", "failures", "intelligence", "performance", "minions", "jobs", "logs", "events", "live", "graph", "runner", "orchestration", "targets", "matrix", "samples", "functions", "keys", "file-copy"):
         sub.add_parser(name)
     args = parser.parse_args()
     settings = Settings.load()

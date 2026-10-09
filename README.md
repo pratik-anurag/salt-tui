@@ -84,6 +84,7 @@ salt-tui runner
 salt-tui orchestration
 salt-tui targets
 salt-tui matrix
+salt-tui samples
 salt-tui functions
 salt-tui keys
 salt-tui file-copy
