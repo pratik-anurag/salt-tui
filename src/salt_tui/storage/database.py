@@ -63,10 +63,11 @@ class Database:
         with self._connect() as con:
             expected = isinstance(run.parsed, dict) and isinstance(run.parsed.get("minions"), list)
             cur = con.execute("""INSERT INTO runs (uuid,started_at,finished_at,command,argv_json,command_type,target_expression,target_type,
-                saltenv,pillarenv,test_mode,exit_code,status,duration_ms,stdout,stderr,raw_result_json,jid,expected_minions_known,parent_run_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (run.uuid, run.started_at, None if run.status == "running" else run.finished_at, safe_command,
+                saltenv,pillarenv,test_mode,exit_code,status,duration_ms,stdout,stderr,raw_result_json,jid,expected_minions_known,parent_run_id,execution_context,action_kind)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (run.uuid, run.started_at, None if run.status == "running" else run.finished_at, safe_command,
                 encode(safe_argv), run.function, run.target, run.target_type, saltenv, pillarenv, int(test_mode),
-                run.exit_code, run.status, run.duration_ms, safe_stdout, safe_stderr, encode(safe_parsed), run.jid, int(expected), run.parent_run_id))
+                run.exit_code, run.status, run.duration_ms, safe_stdout, safe_stderr, encode(safe_parsed), run.jid, int(expected), run.parent_run_id,
+                run.execution_context, run.action_kind))
             run_id = cur.lastrowid
             if isinstance(run.parsed, dict) and run.status != "running":
                 for minion, result in run.parsed.items():
@@ -427,6 +428,31 @@ class Database:
 
     async def states(self, run_id: int) -> list[dict]:
         return await self.query("SELECT * FROM state_results WHERE run_id=? ORDER BY id", (run_id,))
+
+    async def sls_history(self, sls: str, limit: int = 5) -> list[dict]:
+        """Recent results or explicit attempts for one exact SLS name."""
+        return await self.query("""WITH matching AS (
+            SELECT run_id FROM state_results WHERE sls=?
+            UNION
+            SELECT r.id FROM runs r
+            WHERE r.command_type IN ('state.apply','state.sls')
+              AND EXISTS (
+                SELECT 1 FROM json_each(r.argv_json) fn
+                JOIN json_each(r.argv_json) arg ON CAST(arg.key AS INTEGER)=CAST(fn.key AS INTEGER)+1
+                WHERE fn.value=r.command_type
+                  AND instr(',' || replace(arg.value, ' ', '') || ',', ',' || ? || ',')>0
+              )
+          ), recent AS (
+            SELECT run_id FROM matching ORDER BY run_id DESC LIMIT ?
+          )
+          SELECT r.id,r.started_at,r.command_type,r.target_expression,r.target_type,r.saltenv,
+                 r.test_mode,r.status,r.duration_ms,
+                 COUNT(DISTINCT s.minion_id) minions,
+                 SUM(CASE WHEN s.result=0 THEN 1 ELSE 0 END) failed,
+                 SUM(CASE WHEN s.changes_json NOT IN ('{}','null') THEN 1 ELSE 0 END) changed
+          FROM recent JOIN runs r ON r.id=recent.run_id
+          LEFT JOIN state_results s ON s.run_id=r.id AND s.sls=?
+          GROUP BY r.id ORDER BY r.id DESC""", (sls, sls, max(1, min(limit, 20)), sls))
 
     async def state_metrics(self, sls: str, state_id: str, module: str, function: str) -> dict[str, Any]:
         rows = await self.query("""SELECT COUNT(*) samples, AVG(duration_ms) average_ms,

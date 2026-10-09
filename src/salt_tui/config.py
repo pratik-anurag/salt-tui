@@ -17,6 +17,8 @@ class Settings:
     database: Path = field(default_factory=lambda: data_dir() / "history.db")
     default_target: str = "*"
     default_saltenv: str = "base"
+    default_execution_context: str = "auto"
+    theme: str = "dark"
     file_roots: dict[str, list[Path]] = field(default_factory=lambda: {"base": [Path("/srv/salt")]})
     confirm_changes: bool = True
     refresh_seconds: int = 30
@@ -60,4 +62,8 @@ class Settings:
             elif key == "file_roots":
                 value = {env: [Path(p).expanduser() for p in paths] for env, paths in value.items()}
             setattr(settings, key, value)
+        if settings.default_execution_context not in {"auto", "master", "local", "masterless"}:
+            raise ValueError("default_execution_context must be auto, master, local, or masterless")
+        if settings.theme not in {"dark", "light"}:
+            raise ValueError("theme must be dark or light")
         return settings

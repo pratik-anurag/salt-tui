@@ -4,12 +4,19 @@
 | --- | --- |
 | d | Dashboard |
 | m | Minions |
+| f | Function workbench (except screens with a local `f` action) |
+| Ctrl+E | Read-only Salt samples |
+| k | Guided keys |
+| Ctrl+F | File copy |
+| / | Search actions / menu |
+| Ctrl+Shift+L | Toggle light/dark theme for this session |
 | Ctrl+N | Nodegroups |
 | j | Jobs |
 | r | State results |
 | s | SLS explorer |
 | Up / Down (SLS explorer) | Select a local file or Salt-reported state |
 | Shift+Tab / Enter (SLS explorer) | Focus and activate an action button |
+| Enter (SLS recent runs) | Open the highlighted run in Run Tracker |
 | Esc | Return to the previous screen |
 | h | History |
 | l | Logs |

@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 import tempfile
 import logging
+import shutil
 from typing import Any
 
 from textual.app import App
+from textual.theme import Theme
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
@@ -25,6 +27,7 @@ from salt_tui.ui.runner import RunnerScreen, OrchestrationScreen
 from salt_tui.ui.targets import TargetsScreen
 from salt_tui.ui.matrix import MatrixScreen
 from salt_tui.ui.fleet import MinionDetailScreen, NodegroupsScreen
+from salt_tui.ui.workbench import FunctionsScreen, KeysScreen, FileCopyScreen, SamplesScreen
 from salt_tui.salt.commands import build_argv, display_argv, parse_line
 from salt_tui.salt.nodegroups import names as nodegroup_names
 from salt_tui.plugins import PluginRegistry, load_plugins
@@ -41,6 +44,10 @@ class SaltTUI(App):
     TITLE = "Salt TUI"
     CSS = """
     Screen { layout: vertical; }
+    WorkbenchSidebar { dock: left; width: 19; height: 100%; background: $surface; border-right: solid $primary; padding: 0 1; overflow-y: auto; }
+    WorkbenchSidebar .nav-heading { height: 1; color: $accent; text-style: bold; margin-top: 1; }
+    WorkbenchSidebar .nav-button { width: 100%; min-width: 0; height: 2; border: none; content-align: left middle; }
+    WorkbenchContext { height: 1; padding: 0 1; background: $surface; color: $text-muted; }
     .page-title { height: 1; text-style: bold; background: $primary; color: $text; padding: 0 1; }
     .hint { height: 2; padding: 0 1; }
     #capabilities, #summary, #preview { height: auto; min-height: 2; padding: 0 1; }
@@ -58,6 +65,9 @@ class SaltTUI(App):
     #sls-detail #detail-scroll { width: 100%; border: none; }
     #source-title { height: 1; padding: 0 1; text-style: bold; background: $surface; }
     #source-origin { height: auto; max-height: 3; padding: 0 1; color: $text-muted; }
+    #sls-history-title { height: 1; padding: 0 1; text-style: bold; background: $surface; }
+    #sls-history { height: 7; }
+    #sls-history-detail { height: 2; padding: 0 1; color: $text-muted; }
     #review_summary { height: auto; min-height: 2; padding: 0 1; text-style: bold; }
     #review_table { width: 55%; height: 1fr; }
     .toolbar { height: 3; }
@@ -74,6 +84,13 @@ class SaltTUI(App):
     #runner_output { width: 60%; height: 1fr; }
     #orch_states { height: 40%; }
     #orch_output { height: 1fr; }
+    #function_table { width: 45%; height: 1fr; }
+    FunctionsScreen #detail-scroll { width: 55%; }
+    #argument_fields { height: auto; }
+    FunctionsScreen.compact #function_table { width: 100%; }
+    FunctionsScreen.compact #detail-scroll { display: none; }
+    FunctionsScreen.compact.show-function-detail #function_table { display: none; }
+    FunctionsScreen.compact.show-function-detail #detail-scroll { display: block; width: 100%; }
     """
     BINDINGS = [
         ("d", "show('dashboard')", "Dashboard"), ("m", "show('minions')", "Minions"),
@@ -88,6 +105,12 @@ class SaltTUI(App):
         ("ctrl+t", "show('targets')", "Saved targets"),
         ("ctrl+n", "show('nodegroups')", "Nodegroups"),
         ("ctrl+m", "show('matrix')", "State matrix"),
+        ("f", "show('functions')", "Functions"),
+        ("ctrl+e", "show('samples')", "Salt samples"),
+        ("k", "show('keys')", "Keys"),
+        ("ctrl+f", "show('file_copy')", "File copy"),
+        ("slash", "palette", "Search actions"),
+        ("ctrl+shift+l", "toggle_theme", "Toggle light theme"),
         ("exclamation_mark", "show('failures')", "Failures"),
         ("ctrl+r", "refresh", "Refresh"), ("question_mark", "help", "Help"),
         ("escape", "back", "Back"),
@@ -97,6 +120,13 @@ class SaltTUI(App):
     def __init__(self, settings: Settings | None = None, initial: str = "dashboard", command: str | None = None):
         super().__init__()
         self.settings = settings or Settings.load()
+        self.register_theme(Theme(name="salt-dark", primary="#70AD47", accent="#A4D65E", success="#66BF70", dark=True))
+        self.register_theme(Theme(name="salt-light", primary="#397A2A", accent="#397A2A", success="#397A2A",
+                                  background="#F5F7F3", surface="#E9EFE5", foreground="#1F2D1D", dark=False))
+        self.theme = "salt-light" if self.settings.theme == "light" else "salt-dark"
+        self.execution_context = self.settings.default_execution_context
+        if self.execution_context == "auto":
+            self.execution_context = "master" if shutil.which(self.settings.salt) else "local" if shutil.which(self.settings.salt_call) else "master"
         self.plugins = load_plugins() if self.settings.enable_plugins else PluginRegistry()
         if self.settings.backend in self.plugins.backends:
             self.client = self.plugins.backends[self.settings.backend](self.settings)
@@ -119,6 +149,7 @@ class SaltTUI(App):
         self.selected_minions: set[str] = set()
         self.current_minion_id: str | None = None
         self.target_draft: dict[str, str] | None = None
+        self.target_destination: str | None = None
         self.initial = initial
         self._current_screen_name = initial
         self._screen_history: list[str] = []
@@ -150,6 +181,8 @@ class SaltTUI(App):
             "targets": TargetsScreen(),
             "matrix": MatrixScreen(),
             "minion_detail": MinionDetailScreen(), "nodegroups": NodegroupsScreen(),
+            "functions": FunctionsScreen(), "keys": KeysScreen(), "file_copy": FileCopyScreen(),
+            "samples": SamplesScreen(),
         }.items():
             self.install_screen(screen, name)
         for name, factory in self.plugins.screens.items():
@@ -185,6 +218,8 @@ class SaltTUI(App):
 
     async def _detect(self) -> None:
         self.capabilities = await detect_capabilities(self.settings)
+        for context_bar in self.screen.query("WorkbenchContext"):
+            context_bar.refresh_context()
         if isinstance(self.screen, DashboardScreen):
             self.screen.call_after_refresh(self.screen.refresh_data)
 
@@ -196,14 +231,40 @@ class SaltTUI(App):
         if self._busy:
             raise RuntimeError("A Salt command is already running")
         self._busy = True
+        redactor = self.client.redactor.with_values(spec.secret_values)
         lines: list[tuple[str, str]] = []
         async def capture(level: str, line: str) -> None:
+            if spec.action_kind == "file_copy":
+                return
+            line = redactor.text(line)
             if len(lines) < 5000:
                 lines.append((level, line[:2000]))
             if log:
                 await log(level, line)
         try:
             run = await self.client.run(spec, capture)
+            run.command = redactor.text(run.command)
+            run.argv = redactor.argv(run.argv)
+            run.stdout = redactor.text(run.stdout)
+            run.stderr = redactor.text(run.stderr)
+            run.parsed = redactor.value(run.parsed)
+            for state in run.states:
+                for field_name in ("minion", "state_id", "module", "function", "name", "sls"):
+                    setattr(state, field_name, redactor.text(getattr(state, field_name)))
+                state.changes = redactor.value(state.changes)
+                state.comment = redactor.text(state.comment)
+                state.raw = redactor.value(state.raw)
+            run.execution_context = spec.execution_context
+            run.action_kind = spec.action_kind
+            if spec.action_kind == "file_copy":
+                # salt-cp normally returns status only; never trust a plugin or
+                # unusual Salt output not to echo the copied bytes.
+                payload = run.parsed
+                run.parsed = ({str(minion): "success" if result is True else "failed" if result is False else "returned"
+                               for minion, result in payload.items()} if isinstance(payload, dict) else
+                              {"result": "unavailable"})
+                run.stdout = json.dumps(run.parsed, ensure_ascii=False)
+                run.stderr = "" if not run.stderr else "salt-cp reported an error; output suppressed for file privacy"
             run.parent_run_id = parent_run_id
             try:
                 run.id = await self.db.save_run(run, saltenv=spec.saltenv, pillarenv=spec.pillarenv,
@@ -217,6 +278,60 @@ class SaltTUI(App):
             return run
         finally:
             self._busy = False
+
+    async def execute_untracked(self, spec: CommandSpec) -> RunResult:
+        """Run a transient discovery request without retaining its Salt output."""
+        if self._busy:
+            raise RuntimeError("A Salt command is already running")
+        self._busy = True
+        try:
+            run = await self.client.run(spec)
+            redactor = self.client.redactor.with_values(spec.secret_values)
+            run.parsed = redactor.value(run.parsed)
+            run.stdout = redactor.text(run.stdout)
+            run.stderr = redactor.text(run.stderr)
+            return run
+        finally:
+            self._busy = False
+
+    async def inspect_keys(self) -> dict[str, str]:
+        spec = CommandSpec(executable="salt-key", function="list", target="local",
+                           raw_argv=["--list", "all", "--out=json"], action_kind="key_inspection")
+        run = await self.execute_untracked(spec)
+        if run.exit_code != 0 or not isinstance(run.parsed, dict):
+            raise RuntimeError(run.stderr or "Salt returned no structured key list")
+        groups = {"minions_pre": "pending", "minions": "accepted", "minions_rejected": "rejected", "minions_denied": "denied"}
+        result: dict[str, str] = {}
+        for group, state in groups.items():
+            ids = run.parsed.get(group, [])
+            if not isinstance(ids, list):
+                raise RuntimeError("Salt returned an invalid key list")
+            result.update({str(key_id): state for key_id in ids})
+        return result
+
+    async def key_fingerprint(self, key_id: str) -> str:
+        if not key_id or key_id.lower() == "all" or any(char in key_id for char in "*?[]") or key_id.startswith("-"):
+            raise ValueError("Fingerprint requires one exact key ID")
+        spec = CommandSpec(executable="salt-key", function="fingerprint", target=key_id,
+                           raw_argv=["--finger", key_id, "--out=json"], action_kind="key_inspection")
+        run = await self.execute_untracked(spec)
+        if run.exit_code != 0 or not isinstance(run.parsed, dict):
+            raise RuntimeError(run.stderr or "Salt returned no structured fingerprint")
+        def find(value: Any) -> str | None:
+            if isinstance(value, dict):
+                if key_id in value:
+                    selected = value[key_id]
+                    return selected.strip() if isinstance(selected, str) and selected.strip() else None
+                for nested in value.values():
+                    if isinstance(nested, dict):
+                        found = find(nested)
+                        if found:
+                            return found
+            return None
+        fingerprint = find(run.parsed)
+        if not fingerprint:
+            raise RuntimeError("Selected key fingerprint unavailable")
+        return fingerprint
 
     async def preview_target(self, spec: CommandSpec) -> tuple[list[str] | None, str]:
         if spec.executable != "salt":
@@ -271,7 +386,7 @@ class SaltTUI(App):
 
     @staticmethod
     def _state_workflow_key(spec: CommandSpec) -> tuple:
-        return (spec.executable, spec.target, spec.target_type, tuple(spec.arguments), spec.saltenv, spec.pillarenv)
+        return (spec.executable, spec.local_mode, spec.target, spec.target_type, tuple(spec.arguments), spec.saltenv, spec.pillarenv)
 
     async def start_state_workflow(self, spec: CommandSpec) -> None:
         spec = replace(spec, arguments=list(spec.arguments), options=list(spec.options))
@@ -374,7 +489,24 @@ class SaltTUI(App):
             spec = CommandSpec(function="state.apply")
         spec.target = target["expression"]
         spec.target_type = target["target_type"]
+        spec.raw_argv = None
         self.open_command(display_argv(build_argv(spec, self.settings)))
+
+    def apply_saved_target(self, target: dict) -> None:
+        destination = self.target_destination
+        if destination == "file_copy" and target["target_type"] not in {"glob", "grain", "nodegroup", "list", "pcre"}:
+            self.notify("salt-cp cannot use this saved target type", severity="warning")
+            return
+        self.target_destination = None
+        if destination in {"functions", "file_copy"}:
+            self.show_screen(destination)
+            def fill() -> None:
+                prefix = "" if destination == "functions" else "copy_"
+                self.screen.query_one(f"#{prefix}target").value = target["expression"]
+                self.screen.query_one(f"#{prefix}target_type").value = target["target_type"]
+            self.screen.call_after_refresh(fill)
+        else:
+            self.open_command_with_target(target)
 
     def open_minion_detail(self, minion_id: str) -> None:
         self.current_minion_id = minion_id
@@ -404,13 +536,25 @@ class SaltTUI(App):
         if hasattr(self.screen, "refresh_data"):
             self.screen.call_after_refresh(self.screen.refresh_data)
 
+    def on_resize(self, event) -> None:
+        for sidebar in self.screen.query("WorkbenchSidebar"):
+            sidebar.display = event.size.width >= 100
+        self.screen.set_class(event.size.width < 100, "compact")
+
     def show_screen(self, name: str, *, remember: bool = True) -> None:
+        if self._current_screen_name == "targets" and name != "targets":
+            self.target_destination = None
         if name != self._current_screen_name:
             if remember:
                 self._screen_history.append(self._current_screen_name)
             self._current_screen_name = name
         self.switch_screen(name)
         self._update_breadcrumb()
+        self.screen.call_after_refresh(self._refresh_context_bar)
+
+    def _refresh_context_bar(self) -> None:
+        for context_bar in self.screen.query("WorkbenchContext"):
+            context_bar.refresh_context()
 
     def breadcrumb_text(self) -> str:
         names = {"sls": "SLS Explorer", "graph": "Dependencies", "states": "State Results",
@@ -426,12 +570,16 @@ class SaltTUI(App):
     def action_back(self) -> None:
         if isinstance(self.screen, ModalScreen):
             return
+        if isinstance(self.screen, FunctionsScreen) and self.screen.has_class("show-function-detail"):
+            self.screen.set_class(False, "show-function-detail")
+            return
         if self._screen_history:
             self.show_screen(self._screen_history.pop(), remember=False)
         elif self._current_screen_name != "dashboard":
             self.show_screen("dashboard", remember=False)
         if isinstance(self.screen, SlsScreen):
             self.screen.query_one("#files").focus()
+            self.screen.call_after_refresh(self.screen.refresh_selected_history)
 
     def action_refresh(self) -> None:
         if isinstance(self.screen, MinionsScreen):
@@ -446,14 +594,18 @@ class SaltTUI(App):
             asyncio.create_task(self.screen.refresh_data())
 
     def action_help(self) -> None:
-        self.notify("d Dashboard | m Minions | Ctrl+N Nodegroups | j Jobs | r States | Ctrl+M Matrix | v Run tracker | e Events | g Graph | s SLS | h History | l Logs | i Failures | p Slow | Ctrl+U Runner | Ctrl+O Orchestration | Ctrl+T Targets | c Command | : Palette | Esc Back | q Quit", timeout=10)
+        self.notify("d Home | m Minions | f Functions | k Keys | Ctrl+F File copy | c Command | r States | s SLS | j Jobs | h History | / Search | ? Help | Esc Back | q Quit", timeout=10)
+
+    def action_toggle_theme(self) -> None:
+        self.theme = "salt-light" if self.theme == "salt-dark" else "salt-dark"
 
     def action_palette(self) -> None:
         def selected(value: str | None) -> None:
             if not value:
                 return
             name = value.lower().replace(" ", "")
-            aliases = {"state": "states", "runs": "history", "commands": "command", "slses": "sls"}
+            aliases = {"state": "states", "runs": "history", "commands": "command", "slses": "sls",
+                       "filecopy": "file_copy", "file-copy": "file_copy"}
             name = aliases.get(name, name)
             if name in self._installed_screens:
                 self.action_show(name)

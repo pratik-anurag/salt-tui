@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add a Samples screen with bundled read-only Salt examples (`test.ping`, `test.version`, and `grains.item os`), command previews, and inline results.
+- Require a readable master config before starting event monitoring, and show redacted, single-line summaries for event listener failures.
+- Add a responsive task-oriented workbench shell, execution contexts, function catalog and form, guided exact-ID key actions, and single-file `salt-cp` transfer.
+- Record execution context and action kind for new runs; classify read-only functions with an exact allowlist so grain and pillar writes require confirmation.
+
+- Show recent runs for the selected SLS beside its source, with per-SLS failure/change counts and a link to the Run Tracker.
 - Add a Homebrew tap formula and macOS installation instructions.
 - Add Debian package metadata, Ubuntu CI package validation, and Launchpad PPA publication guidance.
 - Update the Minions detail pane immediately after changing a temporary selection.

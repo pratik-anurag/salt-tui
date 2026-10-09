@@ -40,8 +40,11 @@ class SaltPythonBackend:
         if spec.executable != "salt" or spec.options or spec.batch:
             return await self.fallback.run(spec, log)
         argv = build_argv(spec, self.settings)
-        safe = self.redactor.argv(argv)
+        redactor = self.redactor.with_values(spec.secret_values)
+        safe = redactor.argv(argv)
         run = RunResult(display_argv(safe), safe, spec.target, spec.target_type, spec.function)
+        run.execution_context = spec.execution_context
+        run.action_kind = spec.action_kind
         started = datetime.now(timezone.utc)
         positional: list[str] = []
         kwargs: dict[str, Any] = {}
@@ -67,7 +70,7 @@ class SaltPythonBackend:
                 result = await asyncio.to_thread(client.cmd, spec.target, spec.function,
                                                  arg=positional, tgt_type=spec.target_type, kwarg=kwargs,
                                                  timeout=spec.timeout)
-                run.parsed = self.redactor.value(result)
+                run.parsed = redactor.value(result)
                 run.states = extract_states(run.parsed)
                 run.status = summarize_status(0, run.states, run.parsed)
             run.exit_code = 0 if run.status != "failed" else 1
@@ -75,7 +78,7 @@ class SaltPythonBackend:
             if log:
                 await log("INFO", run.stdout)
         except Exception as exc:
-            run.stderr = self.redactor.text(f"Salt Python API error: {type(exc).__name__}: {exc}")
+            run.stderr = redactor.text(f"Salt Python API error: {type(exc).__name__}: {exc}")
             run.exit_code = 1
             run.status = "failed"
             if log:

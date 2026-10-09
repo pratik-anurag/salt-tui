@@ -21,7 +21,7 @@ def main() -> None:
     diagnostics = sub.add_parser("diagnostics", help="Write a redacted support bundle")
     diagnostics.add_argument("--output", type=Path)
     diagnostics.add_argument("--run", type=int, help="Explicitly include one run")
-    for name in ("history", "failures", "intelligence", "performance", "minions", "jobs", "logs", "events", "live", "graph", "runner", "orchestration", "targets", "matrix"):
+    for name in ("history", "failures", "intelligence", "performance", "minions", "jobs", "logs", "events", "live", "graph", "runner", "orchestration", "targets", "matrix", "functions", "keys", "file-copy"):
         sub.add_parser(name)
     args = parser.parse_args()
     settings = Settings.load()
@@ -31,6 +31,8 @@ def main() -> None:
         print(asyncio.run(create_diagnostics_bundle(settings, path, args.run)))
         return
     initial = args.screen or "dashboard"
+    if initial == "file-copy":
+        initial = "file_copy"
     command = None
     if initial == "run":
         initial = "command"

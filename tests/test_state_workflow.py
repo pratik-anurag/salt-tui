@@ -6,10 +6,80 @@ from textual.widgets import Button, DataTable, Input, Static
 
 from salt_tui.app import SaltTUI
 from salt_tui.config import Settings
-from salt_tui.models import RunResult
+from salt_tui.models import RunResult, StateResult
 from salt_tui.salt.parser import extract_states
 from salt_tui.sls.explorer import available_states, local_tree_rows
 from salt_tui.ui.screens import format_state_changes
+
+
+def recorded_state(minion: str, sls: str, *, failed: bool = False, changed: bool = False) -> StateResult:
+    return StateResult(minion, sls, "test", "nop", sls, sls, not failed,
+                       {"updated": True} if changed else {}, "", 20.0, None, {})
+
+
+@pytest.mark.asyncio
+async def test_sls_history_uses_exact_name_and_counts_only_selected_sls(tmp_path: Path):
+    from salt_tui.storage.database import Database
+
+    db = Database(tmp_path / "history.db")
+    await db.migrate()
+    for index in range(3):
+        run = RunResult("salt '*' state.highstate", ["salt", "*", "state.highstate"],
+                        "*", "glob", "state.highstate", status="failed" if index == 1 else "success",
+                        duration_ms=1500 + index)
+        run.states = [recorded_state("web-01", "web", failed=index == 1, changed=index == 2),
+                      recorded_state("web-02", "web", changed=index == 2),
+                      recorded_state("web-01", "web.extra", failed=True)]
+        await db.save_run(run, saltenv="base")
+    rows = await db.sls_history("web", limit=2)
+    assert len(rows) == 2
+    assert [row["id"] for row in rows] == [3, 2]
+    assert [(row["failed"], row["changed"], row["minions"]) for row in rows] == [(0, 2, 2), (1, 0, 2)]
+    assert await db.sls_history("missing") == []
+
+    failed_attempt = RunResult("salt web-01 state.apply web", ["salt", "web-01", "state.apply", "web"],
+                               "web-01", "glob", "state.apply", status="failed")
+    attempt_id = await db.save_run(failed_attempt, saltenv="base")
+    assert (await db.sls_history("web", limit=1))[0]["id"] == attempt_id
+    assert (await db.sls_history("web", limit=1))[0]["failed"] == 0
+
+    other_attempt = RunResult("salt web-01 state.apply web.extra", ["salt", "web-01", "state.apply", "web.extra"],
+                              "web-01", "glob", "state.apply", status="failed")
+    await db.save_run(other_attempt, saltenv="base")
+    assert (await db.sls_history("web", limit=1))[0]["id"] == attempt_id
+
+
+@pytest.mark.asyncio
+async def test_sls_explorer_shows_recent_run_and_opens_tracker(tmp_path: Path):
+    root = tmp_path / "states"
+    root.mkdir()
+    (root / "web.sls").write_text("web:\n  test.nop: []\n")
+    (root / "other.sls").write_text("other:\n  test.nop: []\n")
+    app = SaltTUI(Settings(database=tmp_path / "history.db", file_roots={"base": [root]}), initial="sls")
+    async with app.run_test(size=(140, 40)) as pilot:
+        files = app.screen.query_one("#files", DataTable)
+        files.move_cursor(row=2)
+        await pilot.pause()
+        run = RunResult("salt web-01 state.apply web", ["salt", "web-01", "state.apply", "web"],
+                        "web-01", "glob", "state.apply", status="failed", duration_ms=2300)
+        run.states = [recorded_state("web-01", "web", failed=True)]
+        run_id = await app.db.save_run(run, saltenv="base")
+        await app.screen.refresh_selected_history()
+        await pilot.pause()
+        table = app.screen.query_one("#sls-history", DataTable)
+        assert table.row_count == 1
+        assert "1/0" in str(table.get_row_at(0))
+        files.move_cursor(row=1)
+        await pilot.pause()
+        assert table.row_count == 0
+        files.move_cursor(row=2)
+        await pilot.pause()
+        assert table.row_count == 1
+        table.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.screen is app.get_screen("live")
+        assert app.current_run_id == run_id
 
 
 def test_local_tree_and_salt_inventory(tmp_path: Path):

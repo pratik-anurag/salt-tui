@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 
@@ -5,7 +6,9 @@ import pytest
 
 from salt_tui.models import RunResult
 from salt_tui.salt.client import extract_jid
-from salt_tui.salt.events import EventMonitor, normalize_event, parse_runner_line
+from salt_tui.config import Settings
+from salt_tui.salt.events import (EventMonitor, RunnerEventSource, choose_event_source,
+                                  event_error_summary, normalize_event, parse_runner_line)
 from salt_tui.salt.event_filters import parse_event_filter
 from salt_tui.salt.redaction import redact
 from salt_tui.storage.database import Database
@@ -75,6 +78,48 @@ def test_bounded_event_monitor(tmp_path):
         monitor.publish(event)
     assert len(monitor.recent) == 2
     assert monitor.dropped == 2
+
+
+def test_event_source_requires_readable_master_config(tmp_path, monkeypatch):
+    from salt_tui.salt import events
+    monkeypatch.setattr(events.importlib.util, "find_spec", lambda name: None)
+    monkeypatch.setattr(events.shutil, "which", lambda name: "/usr/bin/salt-run")
+    settings = Settings(master_config=tmp_path / "missing-master")
+    assert choose_event_source(settings) is None
+    settings.master_config.write_text("interface: 127.0.0.1\n")
+    assert isinstance(choose_event_source(settings), RunnerEventSource)
+
+
+@pytest.mark.asyncio
+async def test_event_runner_error_is_one_line_and_redacted(monkeypatch):
+    from salt_tui.salt import events
+
+    class FailedProcess:
+        returncode = 1
+
+        def __init__(self):
+            self.stdout = asyncio.StreamReader()
+            self.stdout.feed_eof()
+            self.stderr = asyncio.StreamReader()
+            self.stderr.feed_data(b"Traceback (most recent call last):\n  frame\n")
+            self.stderr.feed_data(b"OSError: Cannot locate OpenSSL libcrypto; token=private-value\n")
+            self.stderr.feed_eof()
+
+        async def wait(self):
+            return self.returncode
+
+    async def fake_spawn(*argv, **kwargs):
+        return FailedProcess()
+
+    monkeypatch.setattr(events.asyncio, "create_subprocess_exec", fake_spawn)
+    with pytest.raises(RuntimeError) as error:
+        await anext(RunnerEventSource("salt-run").events())
+    message = str(error.value)
+    assert "Cannot locate OpenSSL libcrypto" in message
+    assert "Traceback" not in message
+    assert "private-value" not in message
+    assert "\n" not in message
+    assert len(event_error_summary("first\n" + "x" * 500)) <= 181
 
 
 @pytest.mark.asyncio

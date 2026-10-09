@@ -70,8 +70,11 @@ class SubprocessSaltClient:
 
     async def run(self, spec: CommandSpec, log: LogCallback | None = None) -> RunResult:
         argv = build_argv(spec, self.settings)
-        safe_argv = self.redactor.argv(argv)
+        redactor = self.redactor.with_values(spec.secret_values)
+        safe_argv = redactor.argv(argv)
         run = RunResult(display_argv(safe_argv), safe_argv, spec.target, spec.target_type, spec.function)
+        run.execution_context = spec.execution_context
+        run.action_kind = spec.action_kind
         started = datetime.now(timezone.utc)
         chunks: list[bytes] = []
         errors: list[bytes] = []
@@ -79,7 +82,7 @@ class SubprocessSaltClient:
             while chunk := await stream.readline():
                 sink.append(chunk)
                 if log:
-                    await log(level, self.redactor.text(chunk.decode(errors="replace").rstrip()))
+                    await log(level, redactor.text(chunk.decode(errors="replace").rstrip()))
         try:
             self.process = await asyncio.create_subprocess_exec(*argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             await asyncio.wait_for(asyncio.gather(consume(self.process.stdout, chunks, "INFO"), consume(self.process.stderr, errors, "ERROR"), self.process.wait()), spec.timeout or None)
@@ -112,9 +115,9 @@ class SubprocessSaltClient:
                     except Exception as exc:
                         logging.getLogger("salt_tui").error("Plugin parser failed (%s)", type(exc).__name__)
                         continue
-            run.parsed = self.redactor.value(parsed)
+            run.parsed = redactor.value(parsed)
             run.stdout = json.dumps(run.parsed, ensure_ascii=False, default=str) if not isinstance(run.parsed, str) else run.parsed
-            run.stderr = self.redactor.text(b"".join(errors).decode(errors="replace"))
+            run.stderr = redactor.text(b"".join(errors).decode(errors="replace"))
             run.states = extract_states(run.parsed)
             run.jid = extract_jid(run.parsed, run.stdout)
             if spec.async_run:

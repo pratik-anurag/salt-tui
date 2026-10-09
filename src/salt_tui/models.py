@@ -24,6 +24,11 @@ class CommandSpec:
     timeout: int | None = None
     batch: str | None = None
     async_run: bool = False
+    local_mode: bool = False
+    execution_context: str = "master"
+    action_kind: str = "command"
+    raw_argv: list[str] | None = None
+    secret_values: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -62,6 +67,8 @@ class RunResult:
     id: int | None = None
     jid: str | None = None
     parent_run_id: int | None = None
+    execution_context: str = "legacy"
+    action_kind: str = "command"
 
     @property
     def failed(self) -> int:

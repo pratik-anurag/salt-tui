@@ -42,7 +42,10 @@ class MinionDetailScreen(Screen):
         return self.app  # type: ignore[return-value]
 
     def compose(self) -> ComposeResult:
+        from salt_tui.ui.workbench import WorkbenchSidebar, WorkbenchContext
         yield Header()
+        yield WorkbenchSidebar()
+        yield WorkbenchContext()
         yield Static("Minion detail — live data is redacted; pillars are session-only", classes="page-title")
         with Horizontal(classes="toolbar"):
             yield Button("Grains", id="detail_grains", variant="primary")
@@ -152,7 +155,10 @@ class NodegroupsScreen(Screen):
         return self.app  # type: ignore[return-value]
 
     def compose(self) -> ComposeResult:
+        from salt_tui.ui.workbench import WorkbenchSidebar, WorkbenchContext
         yield Header()
+        yield WorkbenchSidebar()
+        yield WorkbenchContext()
         yield Static("Nodegroups — membership means responding minions, not a complete inventory", classes="page-title")
         with Horizontal(classes="toolbar"):
             yield Button("Refresh selected", id="nodegroups_refresh")

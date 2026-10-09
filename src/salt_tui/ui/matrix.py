@@ -18,7 +18,10 @@ class MatrixScreen(Screen):
         return self.app  # type: ignore[return-value]
 
     def compose(self) -> ComposeResult:
+        from salt_tui.ui.workbench import WorkbenchSidebar, WorkbenchContext
         yield Header()
+        yield WorkbenchSidebar()
+        yield WorkbenchContext()
         yield Static("Fleet state matrix — ✓ pass  C changed  ✗ failed  … pending  ? no return  - not applicable", classes="page-title")
         with Horizontal(classes="toolbar"):
             yield Input(placeholder="Search state or SLS", id="matrix_search")

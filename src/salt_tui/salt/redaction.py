@@ -37,6 +37,11 @@ class Redactor:
     def __init__(self, regexes: list[str] | None = None):
         self.patterns = tuple(re.compile(rule, re.IGNORECASE) for rule in (regexes or []))
 
+    def with_values(self, values: list[str]) -> "Redactor":
+        result = Redactor()
+        result.patterns = self.patterns + tuple(re.compile(re.escape(value)) for value in values if value)
+        return result
+
     def value(self, value: Any) -> Any:
         return redact(value, self.patterns)
 

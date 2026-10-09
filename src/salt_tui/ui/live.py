@@ -28,7 +28,10 @@ class EventScreen(Screen):
         return self.app  # type: ignore[return-value]
 
     def compose(self) -> ComposeResult:
+        from salt_tui.ui.workbench import WorkbenchSidebar, WorkbenchContext
         yield Header()
+        yield WorkbenchSidebar()
+        yield WorkbenchContext()
         yield Static("Event stream — Space pauses, End follows", classes="page-title")
         yield Static("", id="event_status")
         with Horizontal(classes="toolbar"):
@@ -130,7 +133,10 @@ class LiveRunScreen(Screen):
         return self.app  # type: ignore[return-value]
 
     def compose(self) -> ComposeResult:
+        from salt_tui.ui.workbench import WorkbenchSidebar, WorkbenchContext
         yield Header()
+        yield WorkbenchSidebar()
+        yield WorkbenchContext()
         yield Static(self.shell.breadcrumb_text(), classes="breadcrumb")
         yield Static("Run tracker — progress, failures, and logs", classes="page-title")
         yield Static("", id="live_header")
@@ -246,6 +252,8 @@ class LiveRunScreen(Screen):
             return
         completed = [s for s in await self.shell.db.states(run_id) if s["minion_id"] == minion]
         live = await self.shell.db.live_states(run_id, minion)
+        if not self.is_mounted or self.shell.screen is not self:
+            return
         table = self.query_one("#minion_progress", DataTable)
         if not table.row_count:
             return

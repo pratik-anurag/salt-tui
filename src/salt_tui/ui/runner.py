@@ -25,7 +25,10 @@ class RunnerScreen(Screen):
         return self.app  # type: ignore[return-value]
 
     def compose(self) -> ComposeResult:
+        from salt_tui.ui.workbench import WorkbenchSidebar, WorkbenchContext
         yield Header()
+        yield WorkbenchSidebar()
+        yield WorkbenchContext()
         yield Static("Salt runners — discover with salt-run -d or enter any runner function", classes="page-title")
         with Horizontal(classes="toolbar"):
             yield Input(placeholder="Runner function, e.g. jobs.active", id="runner_fun")
@@ -111,7 +114,10 @@ class OrchestrationScreen(Screen):
         return self.app  # type: ignore[return-value]
 
     def compose(self) -> ComposeResult:
+        from salt_tui.ui.workbench import WorkbenchSidebar, WorkbenchContext
         yield Header()
+        yield WorkbenchSidebar()
+        yield WorkbenchContext()
         yield Static("Orchestration — salt-run state.orchestrate", classes="page-title")
         with Horizontal(classes="toolbar"):
             yield Input(placeholder="Orchestration SLS", id="orch_sls")

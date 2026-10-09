@@ -12,12 +12,30 @@ from typing import Any, Protocol
 
 from salt_tui.config import Settings
 from salt_tui.models import SaltEvent, now
-from salt_tui.salt.redaction import Redactor, redact
+from salt_tui.salt.redaction import Redactor, redact, redact_text
 
 
 JOB_TAG = re.compile(r"^salt/job/(?P<jid>\d+)/(?:((?P<kind>new))|(?P<action>start|ret|prog)/(?P<minion>[^/]+))")
 RUN_TAG = re.compile(r"^salt/run/(?P<jid>\d+)/(?P<kind>new|ret)")
 RUNNER_LINE = re.compile(r"^(?P<tag>\S+)\s+(?P<payload>\{.*\})\s*$")
+STATUS_LIMIT = 180
+
+
+def event_error_summary(error: Exception | str) -> str:
+    """Keep subprocess diagnostics useful without rendering tracebacks in the UI."""
+    lines = [line.strip() for line in str(error).splitlines() if line.strip()]
+    detail = redact_text(lines[-1]) if lines else "no diagnostic output"
+    return detail[:STATUS_LIMIT - 1] + "…" if len(detail) > STATUS_LIMIT else detail
+
+
+async def _stderr_tail(stream: asyncio.StreamReader, limit: int = 8192) -> str:
+    """Drain stderr concurrently with stdout, retaining only its diagnostic tail."""
+    tail = bytearray()
+    while chunk := await stream.read(4096):
+        tail.extend(chunk)
+        if len(tail) > limit:
+            del tail[:-limit]
+    return tail.decode(errors="replace")
 
 
 def normalize_event(raw: dict[str, Any], redactor: Redactor | None = None) -> SaltEvent:
@@ -121,6 +139,7 @@ class RunnerEventSource:
     async def events(self) -> AsyncIterator[SaltEvent]:
         proc = await asyncio.create_subprocess_exec(self.executable, "state.event", "pretty=False", "--no-color",
                                                      stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stderr_task = asyncio.create_task(_stderr_tail(proc.stderr))
         try:
             while line := await proc.stdout.readline():
                 event = parse_runner_line(line.decode(errors="replace"))
@@ -128,8 +147,10 @@ class RunnerEventSource:
                     if self.redactor:
                         event.payload = self.redactor.value(event.payload)
                     yield event
-            stderr = (await proc.stderr.read()).decode(errors="replace")[:2000]
-            raise RuntimeError(f"Salt event runner exited ({proc.returncode}): {stderr}")
+            await proc.wait()
+            stderr = await stderr_task
+            reason = event_error_summary(self.redactor.text(stderr) if self.redactor else stderr)
+            raise RuntimeError(f"Salt event runner exited ({proc.returncode}): {reason}")
         finally:
             if proc.returncode is None:
                 proc.terminate()
@@ -138,9 +159,19 @@ class RunnerEventSource:
                 except asyncio.TimeoutError:
                     proc.kill()
                     await proc.wait()
+            if not stderr_task.done():
+                stderr_task.cancel()
+            await asyncio.gather(stderr_task, return_exceptions=True)
 
 
 def choose_event_source(settings: Settings) -> EventSource | None:
+    # An event bus is a master feature. A salt-run binary alone does not imply
+    # that this host has a usable master configuration (notably on laptops).
+    try:
+        with settings.master_config.open("rb") as config:
+            config.read(1)
+    except (OSError, ValueError):
+        return None
     redactor = Redactor(settings.redaction_patterns)
     if importlib.util.find_spec("salt") is not None:
         return PythonSaltEventSource(str(settings.master_config), redactor)
@@ -195,7 +226,7 @@ class EventMonitor:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self.status = f"event source error: {exc}; retrying"
+                self.status = f"event source error: {event_error_summary(exc)}; retrying"
             await asyncio.sleep(delay)
             delay = min(delay * 2, 30)
 
@@ -209,7 +240,7 @@ class EventMonitor:
             try:
                 callback(event)
             except Exception as exc:
-                self.status = f"event display error: {exc}"
+                self.status = f"event display error: {event_error_summary(exc)}"
 
     async def _write(self) -> None:
         saved_since_prune = 0
@@ -228,14 +259,14 @@ class EventMonitor:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    self.status = f"event persistence error: {exc}; retrying"
+                    self.status = f"event persistence error: {event_error_summary(exc)}; retrying"
                     await asyncio.sleep(2)
             saved_since_prune += len(batch)
             if saved_since_prune >= 1000:
                 try:
                     await self.database.prune_events(self.retention)
                 except Exception as exc:
-                    self.status = f"event retention error: {exc}"
+                    self.status = f"event retention error: {event_error_summary(exc)}"
                 saved_since_prune = 0
             for _ in batch:
                 self.queue.task_done()

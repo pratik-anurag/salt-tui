@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from rich.syntax import Syntax
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Button, DataTable, Footer, Header, Input, LoadingIndicator, RichLog, Static
+from textual.widgets import Button, DataTable, Footer, Header, Input, LoadingIndicator, RichLog, Select, Static
 
 from salt_tui.models import CommandSpec
 from salt_tui.salt.commands import build_argv, display_argv, is_mutating, parse_line
@@ -57,7 +58,7 @@ class ConfirmScreen(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm_box"):
-            yield Static(self.message, id="confirm_text")
+            yield Static(Text(self.message), id="confirm_text")
             with Horizontal():
                 yield Button(self.confirm_label, id="yes", variant="warning")
                 yield Button("Cancel", id="no")
@@ -95,7 +96,10 @@ class BaseScreen(Screen):
         return self.app  # type: ignore[return-value]
 
     def compose(self) -> ComposeResult:
+        from salt_tui.ui.workbench import WorkbenchSidebar, WorkbenchContext
         yield Header()
+        yield WorkbenchSidebar()
+        yield WorkbenchContext()
         yield Static(self.shell.breadcrumb_text(), classes="breadcrumb")
         yield Static(self.title_text, classes="page-title")
         yield from self.content()
@@ -106,10 +110,18 @@ class BaseScreen(Screen):
 
 
 class DashboardScreen(BaseScreen):
-    title_text = "Dashboard"
+    title_text = "Home › Operations"
 
     def content(self) -> ComposeResult:
+        from salt_tui.ui.workbench import TargetFields
         yield Static("Checking Salt capabilities…", id="capabilities")
+        yield TargetFields(prefix="home_", default_target=self.shell.settings.default_target)
+        yield Button("Check responders", id="home_check")
+        yield Static("Responding minions: not checked; unreachable matches unknown", id="home_responders")
+        with Horizontal(classes="toolbar"):
+            yield Button("Run function", id="home_function", variant="primary")
+            yield Button("Apply state", id="home_state")
+            yield Button("Copy file", id="home_copy")
         yield Static("Loading recent runs…", id="summary")
         yield DataTable(id="recent", cursor_type="row")
         yield Static("d dashboard  m minions  j jobs  r states  v live  e events  s SLS  h history  l logs  c commands  ! failures  : palette", classes="hint")
@@ -117,7 +129,7 @@ class DashboardScreen(BaseScreen):
 
     async def on_mount(self) -> None:
         table = self.query_one("#recent", DataTable)
-        table.add_columns("Time", "Target", "Command", "Result", "Changed", "Failed", "Duration")
+        table.add_columns("Time", "Action", "Target", "Result", "Changed", "Failed", "Duration")
         await self.refresh_data()
 
     async def refresh_data(self) -> None:
@@ -130,7 +142,7 @@ class DashboardScreen(BaseScreen):
         table.clear()
         self.rows = {str(run["id"]): run for run in runs}
         for run in runs:
-            table.add_row(run["started_at"][:19], run["target_expression"] or "", run["command_type"] or "",
+            table.add_row(run["started_at"][:19], run["command_type"] or "", run["target_expression"] or "",
                           run["status"], str(run["changed"]), str(run["failed"]), f'{run["duration_ms"]/1000:.1f}s', key=str(run["id"]))
         self.query_one("#summary", Static).update(f"Recent runs: {len(runs)} | Failed: {sum(r['status']=='failed' for r in runs)} | Change count: {sum(r['changed'] for r in runs)}")
 
@@ -138,6 +150,41 @@ class DashboardScreen(BaseScreen):
         row = self.rows.get(str(event.row_key.value))
         if row:
             self.shell.open_live_run(int(event.row_key.value))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        action = event.button.id
+        if action == "home_check":
+            asyncio.create_task(self.check_responders())
+            return
+        destination = {"home_function": "functions", "home_state": "sls", "home_copy": "file_copy"}.get(action)
+        if not destination:
+            return
+        target = self.query_one("#home_target", Input).value.strip()
+        target_type = str(self.query_one("#home_target_type", Select).value)
+        if not target or target_type not in {"glob", "grain", "pillar", "compound", "nodegroup", "list", "pcre"}:
+            self.notify("Choose a target and valid target type", severity="error")
+            return
+        if destination == "file_copy" and target_type not in {"glob", "grain", "nodegroup", "list", "pcre"}:
+            self.notify("salt-cp does not support this target type", severity="warning")
+            return
+        self.shell.show_screen(destination)
+        def fill() -> None:
+            prefix = "" if destination == "functions" else "copy_" if destination == "file_copy" else "state_"
+            self.shell.screen.query_one(f"#{prefix}target", Input).value = target
+            if destination == "sls":
+                self.shell.screen.query_one("#state_target_type", Input).value = target_type
+            else:
+                self.shell.screen.query_one(f"#{prefix}target_type").value = target_type
+        self.shell.screen.call_after_refresh(fill)
+
+    async def check_responders(self) -> None:
+        spec = CommandSpec(target=self.query_one("#home_target", Input).value.strip(),
+                           target_type=str(self.query_one("#home_target_type", Select).value))
+        try:
+            members, note = await self.shell.preview_target(spec)
+            self.query_one("#home_responders", Static).update(f"Responding minions: {len(members) if members is not None else 'unknown'} · {note}")
+        except Exception as exc:
+            self.query_one("#home_responders", Static).update(f"Responder check unavailable: {self.shell.client.redactor.text(str(exc))}")
 
 
 class SettingsScreen(BaseScreen):
@@ -152,6 +199,7 @@ class SettingsScreen(BaseScreen):
         roots = "\n".join(f"  {env}: {', '.join(map(str, paths))}" for env, paths in settings.file_roots.items())
         self.query_one("#settings_text", Static).update(
             f"Database: {settings.database}\nDefault target: {settings.default_target}\nDefault saltenv: {settings.default_saltenv}\n"
+            f"Execution context: {settings.default_execution_context} (active: {self.shell.execution_context})\nTheme: {settings.theme}\n"
             f"Confirm changes: {settings.confirm_changes}\nRefresh interval: {settings.refresh_seconds}s\n"
             f"History limit: {settings.history_limit}\nLog limit: {settings.log_limit}\n\nFile roots:\n{roots}\n\n"
             "Edit ~/.config/salt-tui/config.toml and restart to apply changes.")
@@ -190,7 +238,7 @@ class CommandScreen(BaseScreen):
         try:
             spec = parse_line(self.query_one("#command", Input).value, self.shell.settings)
             argv = self.shell.client.redactor.argv(build_argv(spec, self.shell.settings))
-            self.query_one("#preview", Static).update("Command preview (sensitive values masked): " + display_argv(argv))
+            self.query_one("#preview", Static).update(Text("Command preview (sensitive values masked): " + display_argv(argv)))
         except ValueError as exc:
             self.query_one("#preview", Static).update(f"Command error: {exc}")
 
@@ -323,7 +371,7 @@ class TableScreen(BaseScreen):
 
 class HistoryScreen(TableScreen):
     title_text = "Run history — select a run to inspect its states"
-    columns = ("Time", "Target", "Command", "Result", "Changed", "Failed", "Duration")
+    columns = ("Time", "Context", "Target", "Command", "Result", "Changed", "Failed", "Duration")
     BINDINGS = [("x", "compare", "Compare runs")]
 
     def __init__(self):
@@ -348,7 +396,7 @@ class HistoryScreen(TableScreen):
         self.rows = {str(r["id"]): r for r in await self.shell.db.search_runs(query, limit=200, offset=self.page_offset)}
         table = self.query_one("#table", DataTable); table.clear()
         for key, r in self.rows.items():
-            table.add_row(r["started_at"][:19], r["target_expression"] or "", r["command_type"] or "", r["status"],
+            table.add_row(r["started_at"][:19], r["execution_context"], r["target_expression"] or "", r["command_type"] or "", r["status"],
                           str(r["changed"]), str(r["failed"]), f'{r["duration_ms"]/1000:.1f}s', key=key)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -379,7 +427,7 @@ class HistoryScreen(TableScreen):
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         r = self.rows.get(str(event.row_key.value))
         if r:
-            self.show_detail(f"{r['command']}\n\nExit: {r['exit_code']}\nStatus: {r['status']}\n\n{r['stderr'] or r['stdout'] or ''}"[:100000])
+            self.show_detail(f"{r['command']}\n\nContext: {r['execution_context']}\nAction: {r['action_kind']}\nExit: {r['exit_code']}\nStatus: {r['status']}\n\n{r['stderr'] or r['stdout'] or ''}"[:100000])
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         row = self.rows.get(str(event.row_key.value))
@@ -615,6 +663,9 @@ class SlsScreen(BaseScreen):
             with Vertical(id="sls-detail"):
                 yield Static("Source · Select a file", id="source-title")
                 yield Static("", id="source-origin")
+                yield Static("Recent runs · select an SLS", id="sls-history-title")
+                yield DataTable(id="sls-history", cursor_type="row")
+                yield Static("F/C counts are for this SLS; result and duration cover the whole run.", id="sls-history-detail")
                 with VerticalScroll(id="detail-scroll"):
                     yield Static("Select an SLS file", id="source")
 
@@ -624,6 +675,8 @@ class SlsScreen(BaseScreen):
         self.paths: dict[str, tuple[str, Path]] = {}
         self.query_one("#roots_help", Button).display = False
         self.query_one("#files", DataTable).add_columns("State tree", "SLS", "Origin")
+        self.query_one("#sls-history", DataTable).add_columns("When", "Mode", "Result", "F/C", "Run time")
+        self.history_rows: dict[str, dict] = {}
         await self.refresh_data()
         self.query_one("#files", DataTable).focus()
         self._set_compact_labels(self.size.width < 100)
@@ -650,6 +703,7 @@ class SlsScreen(BaseScreen):
         table.clear()
         self.shell.current_sls = None
         self._set_actions_enabled(False)
+        self._clear_history("Recent runs · select an SLS")
         roots_help = self.query_one("#roots_help", Button)
         roots_help.display = False
         if self.source_mode == "local":
@@ -729,13 +783,26 @@ class SlsScreen(BaseScreen):
         if event.button.id in {"high", "low", "deps"}:
             await self.compiled(event.button.id)
 
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+    async def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        if event.data_table.id == "sls-history":
+            row = self.history_rows.get(str(event.row_key.value))
+            if row:
+                detail = (
+                    f"#{row['id']} · {row['command_type']} · {row['target_expression'] or ''} "
+                    f"({row['target_type']}) · env {row['saltenv'] or 'unspecified'} · "
+                    f"{row['minions']} minion(s). Enter opens run."
+                )
+                self.query_one("#sls-history-detail", Static).update(self.shell.client.redactor.text(detail))
+            return
+        if event.data_table.id != "files":
+            return
         entry = self.rows.get(str(event.row_key.value))
         if not entry: return
         rel, path, sls = entry
         self.shell.current_sls = sls
         self._set_actions_enabled(sls is not None)
         if not sls:
+            self._clear_history("Recent runs · select an SLS")
             self.query_one("#source-title", Static).update(f"Local directory · {str(event.row_key.value).split(':')[-1]}")
             self.query_one("#source-origin", Static).update("Choose a file in the tree")
             self.query_one("#sls-status", Static).update("Local directory selected")
@@ -753,6 +820,7 @@ class SlsScreen(BaseScreen):
             self.query_one("#source", Static).update(
                 f"Salt reports {sls}, but no matching local source exists under configured file_roots.\n"
                 "Compiled views and state execution remain available.")
+            await self.refresh_selected_history()
             return
         try:
             text = self.shell.client.redactor.text(path.read_text(errors="replace"))
@@ -760,6 +828,38 @@ class SlsScreen(BaseScreen):
             self.query_one("#source", Static).update(Syntax(text[:250000], lang, line_numbers=True, word_wrap=False))
         except OSError as exc:
             self.query_one("#source", Static).update(str(exc))
+        await self.refresh_selected_history()
+
+    def _clear_history(self, title: str) -> None:
+        self.history_rows = {}
+        self.query_one("#sls-history", DataTable).clear()
+        self.query_one("#sls-history-title", Static).update(title)
+        self.query_one("#sls-history-detail", Static).update(
+            "F/C counts are for this SLS; result and duration cover the whole run.")
+
+    async def refresh_selected_history(self) -> None:
+        sls = self.shell.current_sls
+        if not sls:
+            self._clear_history("Recent runs · select an SLS")
+            return
+        self._clear_history(f"Recent runs · {sls}")
+        rows = await self.shell.db.sls_history(sls)
+        if self.shell.current_sls != sls:
+            return
+        table = self.query_one("#sls-history", DataTable)
+        self.history_rows = {str(row["id"]): row for row in rows}
+        for row in rows:
+            mode = "Test" if row["test_mode"] else "Apply" if (row["command_type"] or "").startswith("state.") else "Run"
+            table.add_row(row["started_at"][:16].replace("T", " "), mode, row["status"],
+                          f"{row['failed']}/{row['changed']}", f"{row['duration_ms'] / 1000:.1f}s",
+                          key=str(row["id"]))
+        if not rows:
+            self.query_one("#sls-history-detail", Static).update(
+                "No recorded runs for this SLS yet.")
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.data_table.id == "sls-history" and str(event.row_key.value) in self.history_rows:
+            self.shell.open_live_run(int(event.row_key.value))
 
     def _local_path(self, env: str, sls: str) -> Path | None:
         return next(iter(local_sls_paths(self.shell.settings, env, sls)), None)
@@ -772,7 +872,10 @@ class SlsScreen(BaseScreen):
             raise ValueError("Target type must be glob, grain, pillar, compound, nodegroup, list, or pcre")
         return CommandSpec(executable="salt-call" if target == "local" else "salt", function=function,
                            target=target, target_type=target_type if target != "local" else "glob",
-                           arguments=arguments, saltenv=env, test=test)
+                           arguments=arguments, saltenv=env, test=test,
+                           local_mode=target == "local" and self.shell.execution_context == "masterless",
+                           execution_context=self.shell.execution_context if target == "local" else "master",
+                           action_kind="state")
 
     async def run_state(self, *, test: bool) -> None:
         sls = self.shell.current_sls

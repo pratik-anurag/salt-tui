@@ -17,7 +17,10 @@ class TargetsScreen(Screen):
         return self.app  # type: ignore[return-value]
 
     def compose(self) -> ComposeResult:
+        from salt_tui.ui.workbench import WorkbenchSidebar, WorkbenchContext
         yield Header()
+        yield WorkbenchSidebar()
+        yield WorkbenchContext()
         yield Static("Saved targets — choose one to apply it to the command runner", classes="page-title")
         with Horizontal(classes="toolbar"):
             yield Input(placeholder="Name", id="target_name")
@@ -83,7 +86,7 @@ class TargetsScreen(Screen):
                 if not row:
                     raise ValueError("Select a saved target")
                 self.shell.selected_target = row
-                self.shell.open_command_with_target(row)
+                self.shell.apply_saved_target(row)
                 return
             await self.refresh_data()
         except Exception as exc:

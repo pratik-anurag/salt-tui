@@ -28,7 +28,10 @@ class GraphScreen(Screen):
         return self.app  # type: ignore[return-value]
 
     def compose(self) -> ComposeResult:
+        from salt_tui.ui.workbench import WorkbenchSidebar, WorkbenchContext
         yield Header()
+        yield WorkbenchSidebar()
+        yield WorkbenchContext()
         yield Static(self.shell.breadcrumb_text(), classes="breadcrumb")
         yield Static("Compiled state graph — Salt low data", classes="page-title")
         with Horizontal(classes="toolbar"):

@@ -1,6 +1,8 @@
 database = "~/.local/share/salt-tui/history.db"
 default_target = "*"
 default_saltenv = "base"
+default_execution_context = "auto" # auto, master, local, or masterless
+theme = "dark" # dark or light; Ctrl+Shift+L toggles for this session
 confirm_changes = true
 confirmation_mode = "always" # always, large-target, production-only, never
 confirm_if_target_count = 20
