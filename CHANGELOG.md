@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add a Homebrew tap formula and macOS installation instructions.
 - Add Debian package metadata, Ubuntu CI package validation, and Launchpad PPA publication guidance.
 - Update the Minions detail pane immediately after changing a temporary selection.
 - Add read-only minion detail for live/cached grains, schedules, beacons, responding nodegroups, and opt-in session-only redacted pillars.

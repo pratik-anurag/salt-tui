@@ -20,6 +20,15 @@ salt-tui
 
 Upgrade with `pipx upgrade salt-tui` and uninstall with `pipx uninstall salt-tui`. Uninstalling leaves your configuration and history in your user directories. Check an installation without opening the TUI using `salt-tui --version` or `salt-tui --help`. Prereleases require an explicit request, such as `pipx install --pip-args='--pre' salt-tui`.
 
+On macOS with [Homebrew](https://brew.sh/):
+
+```sh
+brew tap pratik-anurag/salt-tui
+brew install pratik-anurag/salt-tui/salt-tui
+```
+
+Upgrade with `brew upgrade salt-tui` and remove it with `brew uninstall salt-tui`.
+
 For a development checkout:
 
 ```sh
