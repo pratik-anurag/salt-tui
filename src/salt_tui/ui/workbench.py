@@ -83,22 +83,38 @@ class WorkbenchContext(Static):
 class SamplesScreen(BaseScreen):
     """Bundled read-only Salt examples that use the user's installed CLI."""
 
+    DEFAULT_CSS = """
+    SamplesScreen #sample_intro { height: 1; padding: 0 1; color: $text-muted; }
+    SamplesScreen #sample_context_row { height: 3; }
+    SamplesScreen #sample_context { width: 1fr; }
+    SamplesScreen #sample_actions { height: 3; }
+    SamplesScreen #sample_actions Button { width: 1fr; min-width: 10; }
+    SamplesScreen #sample_target { width: 1fr; }
+    SamplesScreen #sample_target_type { width: 16; }
+    SamplesScreen #sample_hint { height: 1; padding: 0 1; color: $text-muted; }
+    SamplesScreen #sample_preview { height: auto; min-height: 3; max-height: 4; padding: 1; border: round $primary; }
+    SamplesScreen #sample_result { height: 1fr; min-height: 4; overflow-y: auto; padding: 1; border: round $surface; }
+    SamplesScreen.compact #sample_context_row { height: 3; }
+    SamplesScreen.compact #sample_actions { height: 3; }
+    SamplesScreen.compact #sample_target_type { width: 14; }
+    """
+
     title_text = "Run › Samples — safe Salt calls against your selected context"
 
     def content(self) -> ComposeResult:
-        yield Static("These examples call Salt directly and show the returned result. They do not change minion state.")
-        with Horizontal(classes="toolbar"):
+        yield Static("Bundled read-only calls; uses your Salt installation.", id="sample_intro")
+        with Horizontal(id="sample_context_row"):
             yield Select([("Master", "master"), ("Local configured", "local"),
-                          ("Local masterless", "masterless")],
-                         value=self.shell.execution_context, id="sample_context")
+                          ("Local masterless", "masterless")], value=self.shell.execution_context,
+                         id="sample_context")
+        with Horizontal(id="sample_actions"):
             yield Button("Ping minions", id="sample_ping", variant="primary")
             yield Button("Salt version", id="sample_version")
             yield Button("OS grain", id="sample_os")
         yield TargetFields(prefix="sample_", default_target=self.shell.settings.default_target)
-        yield Static("Master sends to the target above. Local uses the configured minion; masterless adds --local.",
-                     id="sample_hint")
+        yield Static("Master uses target · Local uses minion · Masterless adds --local.", id="sample_hint")
         yield CommandPreview("Choose an example to preview its Salt command", id="sample_preview")
-        yield Static("", id="sample_result")
+        yield Static("Run an example to see its response here.", id="sample_result")
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id in {"sample_context", "sample_target_type"}:
